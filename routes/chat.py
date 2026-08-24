@@ -47,6 +47,7 @@ def _error(status: int, message: str, err_type: str, code: str | None = None) ->
     return JSONResponse({"error": err}, status_code=status)
 
 
+@router.post("/chat/completions")
 @router.post("/v1/chat/completions")
 async def chat_completions(payload: ChatCompletionRequest, request: Request):
     state = request.app.state

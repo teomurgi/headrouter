@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from compression import CompressionService
+from compression_service import CompressionService
 from config import Settings
 from middleware import AuthMiddleware, Metrics
 from routes import api_router
@@ -31,6 +32,8 @@ def create_app(settings: Settings | None = None, http_client: httpx.AsyncClient 
             app.state.http_client = httpx.AsyncClient(timeout=settings.request_timeout_seconds)
         else:
             app.state.http_client = http_client
+        if settings.compression_prefetch_enabled:
+            await asyncio.to_thread(app.state.compression.prefetch)
         logger.info(
             "headrouter ready: %d route(s), compression=%s strategy=%s",
             len(settings.routes),

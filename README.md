@@ -99,13 +99,14 @@ A `keys` section in the same JSON maps gateway API keys (the keys your clients s
 | `COMPRESSION_ENABLED` | `1` | Enable headroom compression |
 | `COMPRESSION_THRESHOLD_TOKENS` | `0` | Compress only when input exceeds this token budget; `0` = always compress |
 | `COMPRESSION_STRATEGY` | `coding` | Headroom routing profile: `coding` (recommended), `balanced`, `general`, `agent-90` (aggressive), or `default` (legacy router) |
+| `COMPRESSION_PREFETCH_ENABLED` | `1` | Download the Headroom ONNX compression model and tokenizer before the gateway accepts requests |
 | `REQUEST_TIMEOUT_SECONDS` | `300` | Upstream timeout |
 
 Models can also be addressed directly as `provider:model`, e.g. `"model": "anthropic:claude-sonnet-4"`.
 
 ## Endpoints
 
-- `POST /v1/chat/completions` — OpenAI chat completions with compression + provider translation (streaming and non-streaming)
+- `POST /v1/chat/completions` or `/chat/completions` — OpenAI chat completions with compression + provider translation (streaming and non-streaming)
 - `POST /v1/messages` — native Anthropic Messages requests with the same message compression, metrics, logging, and `X-Compression-Applied` response header; native system prompts, tools, content blocks, query parameters, and response format are preserved.
 - **Any other path** — transparently proxied: the request is forwarded verbatim (method, path, query, body, streaming response) to the resolved provider with only the base URL and auth swapped. The target provider is resolved from the body's `model` (rewritten to the routed model name), the API-key→provider binding, or `GATEWAY_DEFAULT_ROUTE`. So `/v1/embeddings`, `/v1/responses`, files, audio, etc. all work as if pointed directly at the provider.
 - `GET /v1/models` — configured aliases

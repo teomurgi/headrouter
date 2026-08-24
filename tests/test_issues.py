@@ -19,6 +19,7 @@ def make_settings(**overrides) -> Settings:
         routes={"gpt4o": Route("openai", "gpt-4o")},
         default_route=Route("openai", "gpt-4o-mini"),
         compression_threshold_tokens=100000,
+        compression_prefetch_enabled=False,
         provider_base_urls={
             "openai": "https://api.openai.test/v1",
             "anthropic": "https://anthropic.test",

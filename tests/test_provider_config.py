@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app import create_app
-from compression import CompressionService
+from compression_service import CompressionService
 from config import (
     ConfigError,
     KeyBinding,
@@ -70,6 +70,7 @@ def make_settings(**overrides) -> Settings:
             "work-sonnet": Route("work-claude", "claude-sonnet-4"),
         },
         compression_threshold_tokens=100000,
+        compression_prefetch_enabled=False,
         custom_providers=custom,
         provider_base_urls={
             "openai": "https://api.openai.test/v1",
@@ -94,6 +95,11 @@ def test_load_provider_defs_from_inline_json():
 def test_compression_strategy_from_env():
     settings = Settings.from_env({"COMPRESSION_STRATEGY": "BALANCED"})
     assert settings.compression_strategy == "balanced"
+
+
+def test_compression_prefetch_from_env():
+    assert Settings.from_env({}).compression_prefetch_enabled
+    assert not Settings.from_env({"COMPRESSION_PREFETCH_ENABLED": "false"}).compression_prefetch_enabled
 
 
 def test_invalid_compression_strategy_rejected():
@@ -279,6 +285,7 @@ def make_keyed_settings(**overrides) -> Settings:
     return Settings(
         routes={"gpt4o": Route("work-claude", "gpt-4o"), "claude": Route("work-claude", "claude-3")},
         compression_threshold_tokens=100000,
+        compression_prefetch_enabled=False,
         custom_providers=defs,
         key_bindings=keys,
         **overrides,

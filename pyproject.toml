@@ -12,14 +12,15 @@ dependencies = [
     "uvicorn>=0.30",
     "httpx>=0.27",
     "pydantic>=2.7",
-    "headroom-ai>=0.36",
+    "headroom-ai[ml]>=0.36",
+    "onnxruntime>=1.24",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [tool.setuptools]
-py-modules = ["app", "config", "schemas", "compression"]
+py-modules = ["app", "config", "schemas", "compression_service"]
 
 [tool.setuptools.packages.find]
 include = ["adapters*", "middleware*", "routes*"]

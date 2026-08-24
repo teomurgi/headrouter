@@ -148,6 +148,7 @@ def settings():
         },
         provider_api_keys={"openai": "sk-openai", "anthropic": "sk-ant", "gemini": "goog"},
         compression_threshold_tokens=100000,  # no compression during routing tests
+        compression_prefetch_enabled=False,
     )
 
 

@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from app import create_app
-from compression import CompressionResult, CompressionService
+from compression_service import CompressionResult, CompressionService
 from config import Route, Settings
 
 from conftest import API_KEY, make_handler
@@ -24,6 +24,49 @@ def test_compression_disabled_passthrough():
     result = svc.maybe_compress(messages)
     assert result.messages is messages
     assert not result.applied
+
+
+def test_compression_prefetch_starts_only_when_enabled(monkeypatch):
+    model_calls = []
+    tokenizer_calls = []
+
+    monkeypatch.setattr(
+        "headroom.transforms.kompress_compressor.prefetch_kompress_artifacts",
+        lambda: model_calls.append(True) or True,
+    )
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download",
+        lambda **kwargs: tokenizer_calls.append(kwargs["filename"]),
+    )
+
+    assert CompressionService(enabled=True).prefetch()
+    assert not CompressionService(enabled=False).prefetch()
+    assert model_calls == [True]
+    assert tokenizer_calls == [
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+    ]
+
+
+def test_compression_prefetch_runs_on_startup(settings, captured, monkeypatch):
+    calls = []
+    settings.compression_prefetch_enabled = True
+    monkeypatch.setattr(
+        CompressionService,
+        "prefetch",
+        lambda self: calls.append(self.strategy) or True,
+    )
+    app = create_app(
+        settings=settings,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler(captured))),
+    )
+    from fastapi.testclient import TestClient
+
+    with TestClient(app):
+        pass
+
+    assert calls == ["coding"]
 
 
 def test_compression_below_threshold():
@@ -212,6 +255,22 @@ def test_compression_noop_result_is_logged(client, caplog):
     assert "applied=False engine=none" in caplog.text
     assert "original_tokens=25 compressed_tokens=25 tokens_saved=0" in caplog.text
     assert "compression_ratio=1.000 savings_pct=0.0" in caplog.text
+
+
+def test_unprefixed_chat_completions_uses_compression_handler(client, caplog):
+    with caplog.at_level(logging.INFO, logger="headrouter.chat"):
+        response = client.post(
+            "/chat/completions",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={"model": "gpt4o", "messages": [{"role": "user", "content": "hello"}]},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["x-compression-applied"] == "false"
+    assert "compression result model=gpt-4o" in caplog.text
+    assert "original_tokens=" in caplog.text
+    assert "compressed_tokens=" in caplog.text
+    assert "compression_ratio=" in caplog.text
 
 
 def test_upstream_error_propagates_status(settings, captured, caplog):

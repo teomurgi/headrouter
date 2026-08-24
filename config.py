@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from compression import COMPRESSION_STRATEGIES
+from compression_service import COMPRESSION_STRATEGIES
 
 logger = logging.getLogger("headrouter.config")
 
@@ -201,6 +201,7 @@ class Settings:
     compression_enabled: bool = True
     compression_threshold_tokens: int = 0
     compression_strategy: str = "coding"
+    compression_prefetch_enabled: bool = True
     request_timeout_seconds: float = 300.0
     provider_base_urls: dict[str, str] = field(default_factory=dict)
     provider_api_keys: dict[str, str] = field(default_factory=dict)
@@ -247,6 +248,8 @@ class Settings:
             compression_enabled=get("COMPRESSION_ENABLED", "1") not in ("0", "false", "False"),
             compression_threshold_tokens=int(get("COMPRESSION_THRESHOLD_TOKENS", "0") or 0),
             compression_strategy=compression_strategy,
+            compression_prefetch_enabled=get("COMPRESSION_PREFETCH_ENABLED", "1")
+            not in ("0", "false", "False"),
             request_timeout_seconds=float(get("REQUEST_TIMEOUT_SECONDS", "300") or 300),
             provider_base_urls=base_urls,
             provider_api_keys=api_keys,

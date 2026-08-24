@@ -30,6 +30,12 @@ _DEFAULT_MODEL_LIMIT = 128_000
 # - agent-90: aggressive profile targeting roughly 90% savings; highest fidelity risk.
 # - default: legacy Headroom ContentRouter defaults used before strategy support.
 COMPRESSION_STRATEGIES = frozenset({"coding", "balanced", "general", "agent-90", "default"})
+_KOMPRESS_TOKENIZER_ID = "answerdotai/ModernBERT-base"
+_KOMPRESS_TOKENIZER_FILES = (
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+)
 
 
 @dataclass
@@ -111,6 +117,25 @@ class CompressionService:
     @property
     def engine_available(self) -> bool:
         return self._get_pipeline() is not None
+
+    def prefetch(self) -> bool:
+        """Cache Kompress model and tokenizer artifacts before serving requests."""
+        if not self.enabled:
+            return False
+        try:
+            from headroom.transforms.kompress_compressor import prefetch_kompress_artifacts
+            from huggingface_hub import hf_hub_download
+
+            logger.info("prefetching headroom compression model artifacts")
+            if not prefetch_kompress_artifacts():
+                raise RuntimeError("no usable Kompress model artifact found")
+            for filename in _KOMPRESS_TOKENIZER_FILES:
+                hf_hub_download(repo_id=_KOMPRESS_TOKENIZER_ID, filename=filename)
+            logger.info("headroom compression model artifacts ready")
+            return True
+        except Exception as exc:
+            logger.warning("headroom compression model prefetch failed: %s", exc)
+            return False
 
     def _get_pipeline(self):
         if not self._pipeline_checked:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from compression import CompressionResult
+from compression_service import CompressionResult
 
 
 def compress_request_messages(

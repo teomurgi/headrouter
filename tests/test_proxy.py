@@ -4,7 +4,7 @@ import logging
 import httpx
 
 from app import create_app
-from compression import CompressionResult
+from compression_service import CompressionResult
 from config import Route, Settings
 
 from conftest import API_KEY, make_handler
@@ -19,6 +19,7 @@ def make_settings(**overrides) -> Settings:
         },
         default_route=Route("openai", "gpt-4o-mini"),
         compression_threshold_tokens=100000,
+        compression_prefetch_enabled=False,
         provider_base_urls={
             "openai": "https://api.openai.test/v1",
             "openrouter": "https://openrouter.test/v1",
