@@ -92,7 +92,11 @@ async def _gemini_stream():
 def make_handler(captured):
     def handler(request: httpx.Request) -> httpx.Response:
         captured["requests"].append(
-            {"url": str(request.url), "body": json.loads(request.content.decode())}
+            {
+                "url": str(request.url),
+                "body": json.loads(request.content.decode()),
+                "headers": dict(request.headers),
+            }
         )
         url = str(request.url)
         request_body = json.loads(request.content.decode()) if request.content else {}

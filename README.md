@@ -32,12 +32,48 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model": "sonnet", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
+## Provider configuration (JSON)
+
+Target providers are configurable via JSON — either a file (`GATEWAY_PROVIDERS_FILE=providers.json`) or inline (`GATEWAY_PROVIDERS='{"providers": [...]}'`):
+
+```json
+{
+  "providers": [
+    {
+      "name": "my-openai",
+      "type": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-..."
+    },
+    {
+      "name": "work-claude",
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "WORK_ANTHROPIC_KEY"
+    },
+    {
+      "name": "local",
+      "type": "ollama",
+      "base_url": "http://localhost:11434/v1"
+    }
+  ]
+}
+```
+
+- `name` — any identifier you use in routes (`alias=my-openai:model`)
+- `type` — adapter protocol: `openai`, `openrouter`, `ollama`, `openai-compat`, `anthropic`, or `gemini`
+- `base_url` — upstream endpoint
+- `api_key` — inline key, or `api_key_env` to read it from an environment variable (keeps secrets out of the file)
+
+Routes then reference these names, e.g. `GATEWAY_ROUTES="gpt4o=my-openai:gpt-4o,claude=work-claude:claude-sonnet-4"`. Custom providers extend the built-in ones; see `providers.example.json`.
+
 ## Configuration (env)
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Listen address |
 | `GATEWAY_API_KEYS` | *(empty)* | Comma-separated API keys; empty disables auth |
+| `GATEWAY_PROVIDERS_FILE` / `GATEWAY_PROVIDERS` | *(empty)* | Custom providers: JSON file path / inline JSON |
 | `GATEWAY_ROUTES` | *(empty)* | `alias=provider:model,...` logical model routing |
 | `GATEWAY_DEFAULT_ROUTE` | *(empty)* | `provider:model` fallback for unrouted models |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` | | Provider credentials |

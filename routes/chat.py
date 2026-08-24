@@ -13,7 +13,7 @@ from adapters import AdapterError, BaseAdapter
 from adapters.openai_compat import OpenAICompatAdapter
 from adapters.anthropic import AnthropicAdapter
 from adapters.gemini import GeminiAdapter
-from config import OPENAI_COMPAT_PROVIDERS, Settings
+from config import Settings
 from schemas import ChatCompletionRequest
 
 logger = logging.getLogger("headroom-gateway.chat")
@@ -26,15 +26,15 @@ _ADAPTER_CACHE: dict[str, BaseAdapter] = {}
 def get_adapter(provider: str, settings: Settings) -> BaseAdapter:
     if provider in _ADAPTER_CACHE:
         return _ADAPTER_CACHE[provider]
-    base_url, api_key = settings.endpoint(provider)
-    if provider in OPENAI_COMPAT_PROVIDERS:
-        adapter: BaseAdapter = OpenAICompatAdapter(base_url, api_key)
-    elif provider == "anthropic":
-        adapter = AnthropicAdapter(base_url, api_key)
-    elif provider == "gemini":
-        adapter = GeminiAdapter(base_url, api_key)
+    info = settings.endpoint(provider)
+    if info.is_openai_compat:
+        adapter: BaseAdapter = OpenAICompatAdapter(info.base_url, info.api_key)
+    elif info.type == "anthropic":
+        adapter = AnthropicAdapter(info.base_url, info.api_key)
+    elif info.type == "gemini":
+        adapter = GeminiAdapter(info.base_url, info.api_key)
     else:  # pragma: no cover - guarded by settings.endpoint
-        raise KeyError(f"unknown provider: {provider}")
+        raise KeyError(f"unknown provider type: {info.type}")
     _ADAPTER_CACHE[provider] = adapter
     return adapter
 

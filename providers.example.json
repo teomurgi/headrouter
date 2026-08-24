@@ -1,0 +1,27 @@
+{
+  "providers": [
+    {
+      "name": "my-openai",
+      "type": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-..."
+    },
+    {
+      "name": "work-claude",
+      "type": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "WORK_ANTHROPIC_KEY"
+    },
+    {
+      "name": "local",
+      "type": "ollama",
+      "base_url": "http://localhost:11434/v1"
+    },
+    {
+      "name": "google",
+      "type": "gemini",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "api_key": "..."
+    }
+  ]
+}
