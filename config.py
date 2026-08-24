@@ -57,6 +57,31 @@ class ConfigError(ValueError):
     """Raised for invalid provider/route configuration."""
 
 
+def load_dotenv(path: str | Path | None = None, env: dict[str, str] | None = None) -> None:
+    """Load KEY=VALUE pairs from a .env file into os.environ.
+
+    Existing environment variables are never overridden. Lines starting
+    with '#' and blank lines are ignored; surrounding quotes are stripped.
+    """
+    target = os.environ if env is None else env
+    candidates = [Path(path)] if path else [Path(".env"), Path(__file__).resolve().parent / ".env"]
+    for candidate in candidates:
+        try:
+            lines = candidate.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip().strip("'\"")
+            if key and key not in target:
+                target[key] = value
+        if path:
+            break
+
+
 def _parse_routes(raw: str) -> dict[str, Route]:
     """Parse `alias=provider:model,alias2=provider2:model2`."""
     routes: dict[str, Route] = {}
@@ -210,6 +235,8 @@ class Settings:
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
+        if env is None:
+            load_dotenv(os.environ.get("GATEWAY_ENV_FILE") or None)
         env = dict(os.environ if env is None else env)
 
         def get(key: str, default: str = "") -> str:

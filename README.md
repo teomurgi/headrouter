@@ -15,12 +15,12 @@ Works with any OpenAI-compatible client: Claude Code, OpenCode, Cline, Aider, Ro
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
 
-export OPENAI_API_KEY=sk-...
-export GATEWAY_ROUTES="gpt4o=openai:gpt-4o,sonnet=anthropic:claude-sonnet-4"
-export ANTHROPIC_API_KEY=sk-ant-...
+cp .env.example .env   # then edit: OPENAI_API_KEY=..., GATEWAY_ROUTES=..., etc.
 
 .venv/bin/uvicorn app:app --port 8000
 ```
+
+A `.env` file in the working directory (or the repo root) is loaded automatically at startup — no need to `export` variables manually. Real environment variables always take precedence; `.env` only fills in what isn't already set. Set `GATEWAY_ENV_FILE` to load a different file.
 
 Point any OpenAI client at `http://localhost:8000/v1`:
 
@@ -89,6 +89,7 @@ A `keys` section in the same JSON maps gateway API keys (the keys your clients s
 | Variable | Default | Description |
 | --- | --- | --- |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Listen address |
+| `GATEWAY_ENV_FILE` | `.env` | Path to an alternative env file to auto-load |
 | `GATEWAY_API_KEYS` | *(empty)* | Comma-separated API keys; empty disables auth |
 | `GATEWAY_PROVIDERS_FILE` / `GATEWAY_PROVIDERS` | *(empty)* | Custom providers: JSON file path / inline JSON |
 | `GATEWAY_ROUTES` | *(empty)* | `alias=provider:model,...` logical model routing |
@@ -129,6 +130,8 @@ docker run -p 8000:8000 \
   -e GATEWAY_ROUTES="gpt4o=openai:gpt-4o" \
   headrouter
 ```
+
+Or mount your `.env` and skip the `-e` flags: `-v "$PWD/.env:/app/.env"` (auto-loaded at startup).
 
 ## Development
 
