@@ -16,7 +16,7 @@ from adapters.gemini import GeminiAdapter
 from config import Settings
 from schemas import ChatCompletionRequest
 
-logger = logging.getLogger("headroom-gateway.chat")
+logger = logging.getLogger("headrouter.chat")
 
 router = APIRouter()
 
@@ -51,7 +51,7 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     state = request.app.state
     settings: Settings = state.settings
 
-    route = settings.resolve(payload.model)
+    route = settings.resolve(payload.model, getattr(request.state, "gateway_key", None))
     if route is None:
         return _error(
             404,

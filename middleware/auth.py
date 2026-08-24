@@ -30,6 +30,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     status_code=401,
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+            request.state.gateway_key = token
         return await call_next(request)
 
     @staticmethod

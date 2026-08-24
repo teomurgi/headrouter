@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-logger = logging.getLogger("headroom-gateway.config")
+logger = logging.getLogger("headrouter.config")
 
 # Adapter types a provider can use. openai/openrouter/ollama are all handled
 # by the OpenAI-compatible adapter; the set members are accepted as `type`.
@@ -81,26 +81,54 @@ def _parse_route(raw: str | None) -> Route | None:
     return None
 
 
-def load_provider_defs(source: str | list | dict, env: dict[str, str] | None = None) -> dict[str, ProviderDef]:
-    """Load custom provider definitions from a JSON string or a JSON file path.
+@dataclass(frozen=True)
+class KeyBinding:
+    """Maps a gateway API key to a provider (and optional per-key model aliases)."""
 
-    Accepted shapes:
-        {"providers": [{"name": ..., "type": ..., "base_url": ..., "api_key": ...}]}
-        [{"name": ..., "type": ..., "base_url": ..., "api_key": ...}]
+    api_key: str
+    provider: str
+    routes: dict[str, str] = field(default_factory=dict)
 
-    `api_key` may be given directly or via `api_key_env` (name of an env var).
+
+def _load_json(source: str | list | dict) -> dict | list:
+    if isinstance(source, (list, dict)):
+        return source
+    text = source.strip()
+    if text.startswith("[") or text.startswith("{"):
+        return json.loads(text)
+    return json.loads(Path(text).read_text(encoding="utf-8"))
+
+
+def _resolve_secret(entry: dict, env: dict[str, str], what: str) -> str:
+    secret = str(entry.get("api_key", "") or "")
+    secret_env = entry.get("api_key_env")
+    if not secret and secret_env:
+        secret = env.get(str(secret_env), "")
+    if not secret:
+        raise ConfigError(f"{what} needs a non-empty 'api_key' or resolvable 'api_key_env'")
+    return secret
+
+
+def load_gateway_config(
+    source: str | list | dict, env: dict[str, str] | None = None
+) -> tuple[dict[str, ProviderDef], dict[str, KeyBinding]]:
+    """Load providers and API-key bindings from JSON.
+
+    Shape:
+        {
+          "providers": [{"name": ..., "type": ..., "base_url": ..., "api_key"/"api_key_env": ...}],
+          "keys": [{"api_key"/"api_key_env": ..., "provider": ..., "routes": {alias: model}}]
+        }
+
+    Each key binding routes requests authenticated with that key to the given
+    provider. A key must not appear under different providers.
     """
     env = os.environ if env is None else env
-    if isinstance(source, (list, dict)):
-        data = source
-    else:
-        text = source.strip()
-        if text.startswith("[") or text.startswith("{"):
-            data = json.loads(text)
-        else:
-            data = json.loads(Path(text).read_text(encoding="utf-8"))
+    data = _load_json(source)
+    if not isinstance(data, dict):
+        data = {"providers": data}
 
-    entries = data.get("providers", []) if isinstance(data, dict) else data
+    entries = data.get("providers", [])
     if not isinstance(entries, list):
         raise ConfigError("providers JSON must be a list or an object with a 'providers' list")
 
@@ -126,7 +154,39 @@ def load_provider_defs(source: str | list | dict, env: dict[str, str] | None = N
         if name in defs:
             raise ConfigError(f"duplicate provider name '{name}'")
         defs[name] = ProviderDef(name=name, type=ptype, base_url=base_url.rstrip("/"), api_key=api_key)
-    return defs
+
+    key_entries = data.get("keys", [])
+    if not isinstance(key_entries, list):
+        raise ConfigError("'keys' must be a list")
+
+    bindings: dict[str, KeyBinding] = {}
+    for i, entry in enumerate(key_entries):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"key entry #{i} must be an object")
+        provider = str(entry.get("provider", "")).strip()
+        if not provider:
+            raise ConfigError(f"key entry #{i} is missing 'provider'")
+        if provider not in defs and provider not in KNOWN_PROVIDERS:
+            raise ConfigError(f"key entry #{i} references unknown provider '{provider}'")
+        api_key = _resolve_secret(entry, env, f"key entry #{i}")
+        routes = {str(k): str(v) for k, v in (entry.get("routes") or {}).items()}
+        existing = bindings.get(api_key)
+        if existing is not None:
+            if existing.provider != provider:
+                raise ConfigError(
+                    f"api key may not map to multiple providers: '{api_key}' is bound to both "
+                    f"'{existing.provider}' and '{provider}'"
+                )
+            continue  # identical duplicate binding
+        bindings[api_key] = KeyBinding(api_key=api_key, provider=provider, routes=routes)
+    return defs, bindings
+
+
+def load_provider_defs(
+    source: str | list | dict, env: dict[str, str] | None = None
+) -> dict[str, ProviderDef]:
+    """Backward-compatible wrapper returning only the provider definitions."""
+    return load_gateway_config(source, env)[0]
 
 
 @dataclass
@@ -137,11 +197,12 @@ class Settings:
     routes: dict[str, Route] = field(default_factory=dict)
     default_route: Route | None = None
     compression_enabled: bool = True
-    compression_threshold_tokens: int = 4000
+    compression_threshold_tokens: int = 0
     request_timeout_seconds: float = 300.0
     provider_base_urls: dict[str, str] = field(default_factory=dict)
     provider_api_keys: dict[str, str] = field(default_factory=dict)
     custom_providers: dict[str, ProviderDef] = field(default_factory=dict)
+    key_bindings: dict[str, KeyBinding] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -158,9 +219,10 @@ class Settings:
                 api_keys[provider] = env.get(key_var, "")
 
         custom: dict[str, ProviderDef] = {}
+        key_bindings: dict[str, KeyBinding] = {}
         source = get("GATEWAY_PROVIDERS_FILE") or get("GATEWAY_PROVIDERS")
         if source and source.strip():
-            custom = load_provider_defs(source, env=env)
+            custom, key_bindings = load_gateway_config(source, env=env)
 
         keys_raw = get("GATEWAY_API_KEYS")
         api_keys_set = frozenset(k.strip() for k in keys_raw.split(",") if k.strip())
@@ -174,25 +236,54 @@ class Settings:
             routes=_parse_routes(get("GATEWAY_ROUTES")),
             default_route=default_route,
             compression_enabled=get("COMPRESSION_ENABLED", "1") not in ("0", "false", "False"),
-            compression_threshold_tokens=int(get("COMPRESSION_THRESHOLD_TOKENS", "4000") or 4000),
+            compression_threshold_tokens=int(get("COMPRESSION_THRESHOLD_TOKENS", "0") or 0),
             request_timeout_seconds=float(get("REQUEST_TIMEOUT_SECONDS", "300") or 300),
             provider_base_urls=base_urls,
             provider_api_keys=api_keys,
             custom_providers=custom,
+            key_bindings=key_bindings,
         )
+
+    def effective_api_keys(self) -> frozenset[str]:
+        """All keys accepted by the gateway: env-configured plus JSON-bound."""
+        return self.api_keys | frozenset(self.key_bindings)
+
+    def key_binding(self, api_key: str | None) -> KeyBinding | None:
+        if not api_key:
+            return None
+        return self.key_bindings.get(api_key)
 
     def known_provider_names(self) -> set[str]:
         return KNOWN_PROVIDERS | set(self.custom_providers)
 
-    def resolve(self, model: str) -> Route | None:
-        """Resolve a requested model name to a Route."""
+    def resolve(self, model: str, gateway_key: str | None = None) -> Route | None:
+        """Resolve a requested model name to a Route.
+
+        When the request was authenticated with a key that has a provider
+        binding, that provider takes precedence over any route/direct provider.
+        """
+        binding = self.key_binding(gateway_key)
+
+        if binding is None:
+            if model in self.routes:
+                return self.routes[model]
+            direct = _parse_route(model)
+            if direct and direct.provider in self.known_provider_names():
+                return direct
+            return self.default_route
+
+        # Key-bound: provider is fixed; resolve only the model name.
+        if model in binding.routes:
+            return Route(provider=binding.provider, model=binding.routes[model])
         if model in self.routes:
-            return self.routes[model]
-        # Allow explicit `provider:model` passthrough in the request itself.
+            return Route(provider=binding.provider, model=self.routes[model].model)
         direct = _parse_route(model)
-        if direct and direct.provider in self.known_provider_names():
-            return direct
-        return self.default_route
+        if direct:
+            return Route(provider=binding.provider, model=direct.model)
+        if self.default_route is not None:
+            return Route(provider=binding.provider, model=self.default_route.model)
+        # No alias matched: pass the raw model name to the bound provider.
+        return Route(provider=binding.provider, model=model)
 
     def endpoint(self, provider: str) -> ProviderDef:
         """Return the ProviderDef (type, base_url, api_key) for a provider name."""

@@ -14,7 +14,7 @@ async def list_models(request: Request):
     return {
         "object": "list",
         "data": [
-            {"id": mid, "object": "model", "created": 0, "owned_by": "headroom-gateway"}
+            {"id": mid, "object": "model", "created": 0, "owned_by": "headrouter"}
             for mid in ids
         ],
     }

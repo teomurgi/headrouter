@@ -13,7 +13,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-logger = logging.getLogger("headroom-gateway.compression")
+logger = logging.getLogger("headrouter.compression")
 
 _CHARS_PER_TOKEN = 4  # rough fallback estimate
 _DEFAULT_MODEL_LIMIT = 128_000
@@ -75,7 +75,7 @@ class _TokenCounter:
 
 
 class CompressionService:
-    def __init__(self, enabled: bool = True, threshold_tokens: int = 4000):
+    def __init__(self, enabled: bool = True, threshold_tokens: int = 0):
         self.enabled = enabled
         self.threshold_tokens = threshold_tokens
         self._pipeline = None

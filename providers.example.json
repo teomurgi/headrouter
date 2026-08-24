@@ -23,5 +23,18 @@
       "base_url": "https://generativelanguage.googleapis.com",
       "api_key": "..."
     }
+  ],
+  "keys": [
+    {
+      "api_key": "key-team-a",
+      "provider": "my-openai"
+    },
+    {
+      "api_key": "key-team-b",
+      "provider": "work-claude",
+      "routes": {
+        "gpt4o": "claude-sonnet-4"
+      }
+    }
   ]
 }

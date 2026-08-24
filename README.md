@@ -1,4 +1,4 @@
-# Headroom Gateway
+# Headrouter
 
 A lightweight, **stateless** OpenAI-compatible gateway that:
 
@@ -67,6 +67,25 @@ Target providers are configurable via JSON — either a file (`GATEWAY_PROVIDERS
 
 Routes then reference these names, e.g. `GATEWAY_ROUTES="gpt4o=my-openai:gpt-4o,claude=work-claude:claude-sonnet-4"`. Custom providers extend the built-in ones; see `providers.example.json`.
 
+### Mapping API keys to providers
+
+A `keys` section in the same JSON maps gateway API keys (the keys your clients send) to providers:
+
+```json
+{
+  "providers": [ ... ],
+  "keys": [
+    { "api_key": "key-team-a", "provider": "my-openai" },
+    { "api_key_env": "TEAM_B_KEY", "provider": "work-claude", "routes": { "gpt4o": "claude-sonnet-4" } }
+  ]
+}
+```
+
+- Requests authenticated with a bound key are routed to that key's provider. The model still comes from the alias (`GATEWAY_ROUTES`), a `provider:model` string, or an optional per-key `routes` map (`alias -> model`); unknown names are passed through to the provider unchanged.
+- A key must not appear under different providers — configuration is rejected otherwise.
+- Bound keys count as valid gateway API keys (together with `GATEWAY_API_KEYS`).
+- Keys without a binding behave as before: routing follows `GATEWAY_ROUTES` / the default route.
+
 ## Configuration (env)
 
 | Variable | Default | Description |
@@ -80,7 +99,7 @@ Routes then reference these names, e.g. `GATEWAY_ROUTES="gpt4o=my-openai:gpt-4o,
 | `*_BASE_URL` | provider defaults | Override provider endpoints (e.g. proxies, Azure-style gateways) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama endpoint (no key needed) |
 | `COMPRESSION_ENABLED` | `1` | Enable headroom compression |
-| `COMPRESSION_THRESHOLD_TOKENS` | `4000` | Compress only when input exceeds this budget |
+| `COMPRESSION_THRESHOLD_TOKENS` | `0` | Compress only when input exceeds this token budget; `0` = always compress |
 | `REQUEST_TIMEOUT_SECONDS` | `300` | Upstream timeout |
 
 Models can also be addressed directly as `provider:model`, e.g. `"model": "anthropic:claude-sonnet-4"`.
@@ -102,11 +121,11 @@ Models can also be addressed directly as `provider:model`, e.g. `"model": "anthr
 ## Docker
 
 ```bash
-docker build -t headroom-gateway .
+docker build -t headrouter .
 docker run -p 8000:8000 \
   -e OPENAI_API_KEY=sk-... \
   -e GATEWAY_ROUTES="gpt4o=openai:gpt-4o" \
-  headroom-gateway
+  headrouter
 ```
 
 For compression inside the container, uncomment the `headroom-ai` line in the `Dockerfile`.
