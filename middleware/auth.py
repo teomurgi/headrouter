@@ -9,13 +9,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 
+PUBLIC_PATHS = {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_keys: Container[str]):
         super().__init__(app)
         self.api_keys = api_keys
 
     async def dispatch(self, request: Request, call_next):
-        if self.api_keys and request.url.path.startswith("/v1"):
+        if self.api_keys and request.url.path not in PUBLIC_PATHS:
             token = self._extract_token(request)
             if token is None or token not in self.api_keys:
                 return JSONResponse(

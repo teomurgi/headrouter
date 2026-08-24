@@ -106,7 +106,8 @@ Models can also be addressed directly as `provider:model`, e.g. `"model": "anthr
 
 ## Endpoints
 
-- `POST /v1/chat/completions` — chat completions (streaming and non-streaming)
+- `POST /v1/chat/completions` — chat completions with compression + provider translation (streaming and non-streaming)
+- **Any other path** — transparently proxied: the request is forwarded verbatim (method, path, query, body, streaming response) to the resolved provider with only the base URL and auth swapped. The target provider is resolved from the body's `model` (rewritten to the routed model name), the API-key→provider binding, or `GATEWAY_DEFAULT_ROUTE`. So `/v1/embeddings`, `/v1/messages` (Anthropic-native), `/v1/responses`, files, audio, etc. all work as if pointed directly at the provider.
 - `GET /v1/models` — configured aliases
 - `GET /health` — liveness + compression engine status
 - `GET /metrics` — Prometheus text format (requests, latency, tokens, compression savings)

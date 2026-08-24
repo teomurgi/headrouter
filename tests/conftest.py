@@ -94,7 +94,7 @@ def make_handler(captured):
         captured["requests"].append(
             {
                 "url": str(request.url),
-                "body": json.loads(request.content.decode()),
+                "body": json.loads(request.content.decode()) if request.content else {},
                 "headers": dict(request.headers),
             }
         )
@@ -112,6 +112,18 @@ def make_handler(captured):
             if request_body.get("stream"):
                 return httpx.Response(200, content=_openai_stream_chunks())
             return httpx.Response(200, json=_openai_response())
+        if url.endswith("/completions") and request_body.get("stream"):
+            return httpx.Response(200, content=_openai_stream_chunks())
+        if url.endswith("/embeddings"):
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+                    "model": request_body.get("model", ""),
+                    "usage": {"prompt_tokens": 3, "total_tokens": 3},
+                },
+            )
         return httpx.Response(404, json={"error": "not found"})
 
     return handler
