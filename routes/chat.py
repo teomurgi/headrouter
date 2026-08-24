@@ -1,0 +1,115 @@
+"""POST /v1/chat/completions — validate, compress, route, forward, stream."""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from adapters import AdapterError, BaseAdapter
+from adapters.openai_compat import OpenAICompatAdapter
+from adapters.anthropic import AnthropicAdapter
+from adapters.gemini import GeminiAdapter
+from config import OPENAI_COMPAT_PROVIDERS, Settings
+from schemas import ChatCompletionRequest
+
+logger = logging.getLogger("headroom-gateway.chat")
+
+router = APIRouter()
+
+_ADAPTER_CACHE: dict[str, BaseAdapter] = {}
+
+
+def get_adapter(provider: str, settings: Settings) -> BaseAdapter:
+    if provider in _ADAPTER_CACHE:
+        return _ADAPTER_CACHE[provider]
+    base_url, api_key = settings.endpoint(provider)
+    if provider in OPENAI_COMPAT_PROVIDERS:
+        adapter: BaseAdapter = OpenAICompatAdapter(base_url, api_key)
+    elif provider == "anthropic":
+        adapter = AnthropicAdapter(base_url, api_key)
+    elif provider == "gemini":
+        adapter = GeminiAdapter(base_url, api_key)
+    else:  # pragma: no cover - guarded by settings.endpoint
+        raise KeyError(f"unknown provider: {provider}")
+    _ADAPTER_CACHE[provider] = adapter
+    return adapter
+
+
+def _error(status: int, message: str, err_type: str, code: str | None = None) -> JSONResponse:
+    err = {"message": message, "type": err_type}
+    if code:
+        err["code"] = code
+    return JSONResponse({"error": err}, status_code=status)
+
+
+@router.post("/v1/chat/completions")
+async def chat_completions(payload: ChatCompletionRequest, request: Request):
+    state = request.app.state
+    settings: Settings = state.settings
+
+    route = settings.resolve(payload.model)
+    if route is None:
+        return _error(
+            404,
+            f"The model `{payload.model}` does not exist or is not routed. "
+            f"Configure it via GATEWAY_ROUTES.",
+            "invalid_request_error",
+            "model_not_found",
+        )
+
+    try:
+        adapter = get_adapter(route.provider, settings)
+    except KeyError:
+        return _error(404, f"Unknown provider `{route.provider}`.", "invalid_request_error", "provider_not_found")
+
+    body = payload.model_dump(exclude_none=True)
+    body["model"] = route.model
+    body.pop("n", None)
+
+    compression_result = state.compression.maybe_compress(body.get("messages") or [], route.model)
+    body["messages"] = compression_result.messages
+    state.metrics.observe_compression(
+        compression_result.tokens_before, compression_result.tokens_after, compression_result.applied
+    )
+    if compression_result.applied:
+        logger.info(
+            "compressed context %d -> %d tokens (%.1f%% saved)",
+            compression_result.tokens_before,
+            compression_result.tokens_after,
+            100 * compression_result.tokens_saved / max(1, compression_result.tokens_before),
+        )
+
+    started = time.perf_counter()
+
+    if payload.stream:
+        return StreamingResponse(
+            adapter.stream(state.http_client, body),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Compression-Applied": str(compression_result.applied).lower(),
+            },
+        )
+
+    try:
+        result = await adapter.complete(state.http_client, body)
+    except AdapterError as exc:
+        state.metrics.observe_request(route.provider, exc.status_code, time.perf_counter() - started)
+        logger.warning("upstream %s error %s: %s", route.provider, exc.status_code, exc.message)
+        return _error(exc.status_code, exc.message, "upstream_error")
+    except Exception as exc:  # connection failures etc.
+        state.metrics.observe_request(route.provider, 502, time.perf_counter() - started)
+        logger.exception("upstream request failed")
+        return _error(502, f"Upstream request failed: {exc}", "upstream_error")
+
+    state.metrics.observe_request(route.provider, 200, time.perf_counter() - started)
+    usage = result.get("usage") or {}
+    state.metrics.observe_usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+
+    headers = {"X-Compression-Applied": str(compression_result.applied).lower()}
+    return JSONResponse(result, headers=headers)
