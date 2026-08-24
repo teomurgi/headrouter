@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from compression import COMPRESSION_STRATEGIES
+
 logger = logging.getLogger("headrouter.config")
 
 # Adapter types a provider can use. openai/openrouter/ollama are all handled
@@ -198,6 +200,7 @@ class Settings:
     default_route: Route | None = None
     compression_enabled: bool = True
     compression_threshold_tokens: int = 0
+    compression_strategy: str = "coding"
     request_timeout_seconds: float = 300.0
     provider_base_urls: dict[str, str] = field(default_factory=dict)
     provider_api_keys: dict[str, str] = field(default_factory=dict)
@@ -228,6 +231,12 @@ class Settings:
         api_keys_set = frozenset(k.strip() for k in keys_raw.split(",") if k.strip())
 
         default_route = _parse_route(get("GATEWAY_DEFAULT_ROUTE"))
+        compression_strategy = get("COMPRESSION_STRATEGY", "coding").strip().lower() or "coding"
+        if compression_strategy not in COMPRESSION_STRATEGIES:
+            raise ConfigError(
+                f"invalid COMPRESSION_STRATEGY {compression_strategy!r}; expected one of "
+                f"{sorted(COMPRESSION_STRATEGIES)}"
+            )
 
         return cls(
             host=get("HOST", "0.0.0.0"),
@@ -237,6 +246,7 @@ class Settings:
             default_route=default_route,
             compression_enabled=get("COMPRESSION_ENABLED", "1") not in ("0", "false", "False"),
             compression_threshold_tokens=int(get("COMPRESSION_THRESHOLD_TOKENS", "0") or 0),
+            compression_strategy=compression_strategy,
             request_timeout_seconds=float(get("REQUEST_TIMEOUT_SECONDS", "300") or 300),
             provider_base_urls=base_urls,
             provider_api_keys=api_keys,

@@ -22,6 +22,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from config import Settings
+from .request_compression import compress_request_messages
 
 logger = logging.getLogger("headrouter.proxy")
 
@@ -47,6 +48,7 @@ RESPONSE_HEADERS_TO_DROP = {"content-length", "transfer-encoding", "connection",
 # Bodies up to this size may be buffered for JSON model inspection/rewriting;
 # anything larger is streamed through without buffering.
 MAX_PEEK_BYTES = 64 * 1024
+MAX_ERROR_LOG_BYTES = 16 * 1024
 
 
 def _resolve_route(request: Request, body: bytes, settings: Settings):
@@ -117,12 +119,13 @@ async def proxy_all(path: str, request: Request):
     )
     json_content = "json" in (request.headers.get("content-type") or "").lower()
     bounded = content_length is not None and int(content_length) <= MAX_PEEK_BYTES
+    messages_endpoint = request.method == "POST" and path.rstrip("/") == "v1/messages"
 
     body = b""
     request_stream = None
-    if has_body and json_content and bounded:
-        # Small JSON body: read it (bounded) so model-based routing and
-        # model rewriting keep working.
+    if has_body and json_content and (bounded or messages_endpoint):
+        # Native Messages bodies must be inspected regardless of size so they
+        # can use the same context-compression path as chat completions.
         body = await request.body()
     elif has_body:
         # Large or unbounded body: stream it through without buffering.
@@ -132,6 +135,11 @@ async def proxy_all(path: str, request: Request):
     if resolved is None:
         if request_stream is not None:
             await request_stream.aclose()
+        logger.warning(
+            "proxy routing error method=%s path=%s status=404 code=no_provider",
+            request.method,
+            request.url.path,
+        )
         return JSONResponse(
             {
                 "error": {
@@ -146,24 +154,43 @@ async def proxy_all(path: str, request: Request):
         )
     provider, target_model = resolved
 
-    if target_model and body:
+    payload = None
+    if body:
         try:
             payload = json.loads(body)
-            if isinstance(payload, dict):
+            if target_model and isinstance(payload, dict):
                 payload["model"] = target_model
-                body = json.dumps(payload).encode()
         except Exception:
-            pass
+            payload = None
 
     try:
         info = settings.endpoint(provider)
     except KeyError:
         if request_stream is not None:
             await request_stream.aclose()
+        logger.warning(
+            "proxy routing error method=%s path=%s provider=%s status=404 code=unknown_provider",
+            request.method,
+            request.url.path,
+            provider,
+        )
         return JSONResponse(
             {"error": {"message": f"Unknown provider `{provider}`.", "type": "invalid_request_error"}},
             status_code=404,
         )
+
+    compression_result = None
+    if (
+        messages_endpoint
+        and info.type == "anthropic"
+        and isinstance(payload, dict)
+        and isinstance(payload.get("messages"), list)
+    ):
+        model = payload.get("model") if isinstance(payload.get("model"), str) else ""
+        compression_result = compress_request_messages(state, payload, model, logger)
+
+    if payload is not None:
+        body = json.dumps(payload).encode()
 
     url = _target_url(info.base_url, path, info.is_openai_compat, request.url.query)
     headers = _upstream_headers(request, info.type, info.api_key)
@@ -179,7 +206,13 @@ async def proxy_all(path: str, request: Request):
         upstream = await state.http_client.send(upstream_request, stream=True)
     except Exception as exc:
         state.metrics.observe_request(provider, 502, time.perf_counter() - started)
-        logger.warning("proxy upstream %s failed: %s", provider, exc)
+        logger.exception(
+            "proxy request failed method=%s path=%s provider=%s status=502 error=%s",
+            request.method,
+            request.url.path,
+            provider,
+            exc,
+        )
         return JSONResponse(
             {"error": {"message": f"Upstream request failed: {exc}", "type": "upstream_error"}},
             status_code=502,
@@ -187,11 +220,40 @@ async def proxy_all(path: str, request: Request):
 
     state.metrics.observe_request(provider, upstream.status_code, time.perf_counter() - started)
 
+    error_preview = bytearray()
+
     async def stream_bytes() -> AsyncIterator[bytes]:
         try:
             async for chunk in upstream.aiter_bytes():
+                if upstream.status_code >= 400 and len(error_preview) < MAX_ERROR_LOG_BYTES:
+                    remaining = MAX_ERROR_LOG_BYTES - len(error_preview)
+                    error_preview.extend(chunk[:remaining])
                 yield chunk
+        except Exception:
+            logger.exception(
+                "proxy response stream failed method=%s path=%s provider=%s status=%s",
+                request.method,
+                request.url.path,
+                provider,
+                upstream.status_code,
+            )
+            raise
         finally:
+            if upstream.status_code >= 400:
+                request_id = upstream.headers.get("x-request-id") or upstream.headers.get("request-id")
+                preview = error_preview.decode("utf-8", "replace")
+                if len(error_preview) == MAX_ERROR_LOG_BYTES:
+                    preview += "... [truncated]"
+                logger.warning(
+                    "proxy upstream error method=%s path=%s provider=%s status=%s "
+                    "request_id=%s body=%r",
+                    request.method,
+                    request.url.path,
+                    provider,
+                    upstream.status_code,
+                    request_id or "-",
+                    preview,
+                )
             # Also closes the upstream cleanly if the client disconnects mid-stream.
             await upstream.aclose()
 
@@ -199,7 +261,12 @@ async def proxy_all(path: str, request: Request):
         (k, v)
         for k, v in upstream.headers.multi_items()
         if k.lower() not in RESPONSE_HEADERS_TO_DROP
+        and (compression_result is None or k.lower() != "x-compression-applied")
     ]
+    if compression_result is not None:
+        passthrough_headers.append(
+            ("x-compression-applied", str(compression_result.applied).lower())
+        )
     response = StreamingResponse(
         stream_bytes(),
         status_code=upstream.status_code,

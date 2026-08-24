@@ -6,7 +6,11 @@ import logging
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from compression import CompressionService
 from config import Settings
@@ -28,9 +32,10 @@ def create_app(settings: Settings | None = None, http_client: httpx.AsyncClient 
         else:
             app.state.http_client = http_client
         logger.info(
-            "headrouter ready: %d route(s), compression=%s",
+            "headrouter ready: %d route(s), compression=%s strategy=%s",
             len(settings.routes),
             settings.compression_enabled,
+            settings.compression_strategy,
         )
         yield
         if owns_client:
@@ -41,11 +46,44 @@ def create_app(settings: Settings | None = None, http_client: httpx.AsyncClient 
     app.state.compression = CompressionService(
         enabled=settings.compression_enabled,
         threshold_tokens=settings.compression_threshold_tokens,
+        strategy=settings.compression_strategy,
     )
     app.state.metrics = Metrics()
 
     if settings.effective_api_keys():
         app.add_middleware(AuthMiddleware, api_keys=settings.effective_api_keys())
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        details = [
+            {"type": error["type"], "loc": error["loc"], "msg": error["msg"]}
+            for error in exc.errors()
+        ]
+        logger.warning(
+            "request validation error method=%s path=%s status=422 details=%r",
+            request.method,
+            request.url.path,
+            details,
+        )
+        return JSONResponse(
+            status_code=422,
+            content=jsonable_encoder({"detail": exc.errors()}),
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException):
+        logger.warning(
+            "http error method=%s path=%s status=%s detail=%r",
+            request.method,
+            request.url.path,
+            exc.status_code,
+            exc.detail,
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers,
+        )
 
     app.include_router(api_router)
     return app

@@ -1,10 +1,11 @@
 import json
+import logging
 
 import httpx
 import pytest
 
 from app import create_app
-from compression import CompressionService
+from compression import CompressionResult, CompressionService
 from config import Route, Settings
 
 from conftest import API_KEY, make_handler
@@ -31,19 +32,6 @@ def test_compression_below_threshold():
     result = svc.maybe_compress(messages)
     assert not result.applied
     assert result.messages is messages
-
-
-def test_compression_headroom_unavailable_falls_back():
-    svc = CompressionService(enabled=True, threshold_tokens=1)
-    messages = [{"role": "user", "content": "hello world, this is a longer message"}]
-    # Force pipeline check to find nothing
-    svc._pipeline_checked = True
-    svc._pipeline = None
-    result = svc.maybe_compress(messages)
-    assert not result.applied
-    assert result.messages is messages
-    assert result.tokens_before > 0
-    assert result.tokens_after == result.tokens_before
 
 
 def test_compression_uses_headroom_pipeline_when_available():
@@ -109,8 +97,20 @@ def test_compression_pipeline_exception_passthrough():
     assert result.messages is messages
 
 
+def test_coding_strategy_configures_headroom_router():
+    service = CompressionService(strategy="coding")
+    pipeline = service._get_pipeline()
+    assert pipeline is not None
+    router_config = pipeline.transforms[0].config
+    assert not router_config.force_kompress_all
+    assert router_config.protect_recent_code == 0
+    assert router_config.protect_error_outputs
+    assert router_config.min_chars_for_block_compression == 25
+    assert service._compress_user_messages
+    assert not service._compress_system_messages
+
+
 def test_compression_with_real_headroom():
-    pytest.importorskip("headroom")
     import json as _json
 
     svc = CompressionService(enabled=True, threshold_tokens=4000)
@@ -163,7 +163,58 @@ def test_compression_metrics_recorded(settings, captured):
         assert "gateway_compression_attempts_total 1" in r.text
 
 
-def test_upstream_error_propagates_status(settings, captured):
+def test_compression_result_is_always_logged(client, caplog):
+    class FakeCompression:
+        def maybe_compress(self, messages, model):
+            return CompressionResult(
+                messages=messages,
+                applied=True,
+                tokens_before=120,
+                tokens_after=40,
+                engine="headroom",
+                transforms_applied=["code", "summarize"],
+            )
+
+    client.app.state.compression = FakeCompression()
+    with caplog.at_level(logging.INFO, logger="headrouter.chat"):
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={"model": "gpt4o", "messages": [{"role": "user", "content": "hello"}]},
+        )
+
+    assert response.status_code == 200
+    assert "original_tokens=120 compressed_tokens=40 tokens_saved=80" in caplog.text
+    assert "compression_ratio=3.000 savings_pct=66.7" in caplog.text
+    assert "applied=True engine=headroom" in caplog.text
+    assert "transforms=code,summarize" in caplog.text
+
+
+def test_compression_noop_result_is_logged(client, caplog):
+    class FakeCompression:
+        def maybe_compress(self, messages, model):
+            return CompressionResult(
+                messages=messages,
+                applied=False,
+                tokens_before=25,
+                tokens_after=25,
+            )
+
+    client.app.state.compression = FakeCompression()
+    with caplog.at_level(logging.INFO, logger="headrouter.chat"):
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={"model": "gpt4o", "messages": [{"role": "user", "content": "hello"}]},
+        )
+
+    assert response.status_code == 200
+    assert "applied=False engine=none" in caplog.text
+    assert "original_tokens=25 compressed_tokens=25 tokens_saved=0" in caplog.text
+    assert "compression_ratio=1.000 savings_pct=0.0" in caplog.text
+
+
+def test_upstream_error_propagates_status(settings, captured, caplog):
     def error_handler(request):
         return httpx.Response(429, json={"error": {"message": "rate limited"}})
 
@@ -173,14 +224,19 @@ def test_upstream_error_propagates_status(settings, captured):
     )
     from fastapi.testclient import TestClient
 
-    with TestClient(app) as c:
-        r = c.post(
-            "/v1/chat/completions",
-            headers={"Authorization": f"Bearer {API_KEY}"},
-            json={"model": "gpt4o", "messages": [{"role": "user", "content": "hi"}]},
-        )
-        assert r.status_code == 429
-        assert "rate limited" in r.json()["error"]["message"]
+    with caplog.at_level("WARNING", logger="headrouter.chat"):
+        with TestClient(app) as c:
+            r = c.post(
+                "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {API_KEY}"},
+                json={"model": "gpt4o", "messages": [{"role": "user", "content": "hi"}]},
+            )
+            assert r.status_code == 429
+            assert "rate limited" in r.json()["error"]["message"]
+
+    assert "provider=openai model=gpt-4o status=429" in caplog.text
+    assert "rate limited" in caplog.text
+    assert API_KEY not in caplog.text
 
 
 def test_connection_failure_returns_502(settings):

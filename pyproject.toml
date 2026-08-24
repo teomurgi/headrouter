@@ -12,10 +12,10 @@ dependencies = [
     "uvicorn>=0.30",
     "httpx>=0.27",
     "pydantic>=2.7",
+    "headroom-ai>=0.36",
 ]
 
 [project.optional-dependencies]
-compression = ["headroom-ai>=0.36"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [tool.setuptools]

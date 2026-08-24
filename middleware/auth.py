@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Container
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -10,6 +11,7 @@ from starlette.responses import JSONResponse
 
 
 PUBLIC_PATHS = {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+logger = logging.getLogger("headrouter.auth")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -21,6 +23,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if self.api_keys and request.url.path not in PUBLIC_PATHS:
             token = self._extract_token(request)
             if token is None or token not in self.api_keys:
+                logger.warning(
+                    "authentication error method=%s path=%s status=401 reason=%s client=%s",
+                    request.method,
+                    request.url.path,
+                    "missing_key" if token is None else "invalid_key",
+                    request.client.host if request.client else "-",
+                )
                 return JSONResponse(
                     {
                         "error": {

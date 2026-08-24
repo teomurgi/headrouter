@@ -104,7 +104,7 @@ def make_handler(captured):
             return httpx.Response(200, content=_gemini_stream())
         if url.endswith(":generateContent"):
             return httpx.Response(200, json=_gemini_response())
-        if url.endswith("/v1/messages"):
+        if request.url.path.endswith("/v1/messages"):
             if request_body.get("stream"):
                 return httpx.Response(200, content=_anthropic_stream())
             return httpx.Response(200, json=_anthropic_response())

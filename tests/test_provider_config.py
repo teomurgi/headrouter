@@ -91,6 +91,16 @@ def test_load_provider_defs_from_inline_json():
     assert defs["my-openai"].is_openai_compat
 
 
+def test_compression_strategy_from_env():
+    settings = Settings.from_env({"COMPRESSION_STRATEGY": "BALANCED"})
+    assert settings.compression_strategy == "balanced"
+
+
+def test_invalid_compression_strategy_rejected():
+    with pytest.raises(ConfigError, match="invalid COMPRESSION_STRATEGY"):
+        Settings.from_env({"COMPRESSION_STRATEGY": "maximum"})
+
+
 def test_load_provider_defs_api_key_env_resolution():
     defs = load_provider_defs(PROVIDERS_JSON, env={"WORK_ANTHROPIC_KEY": "secret123"})
     assert defs["work-claude"].api_key == "secret123"

@@ -15,6 +15,7 @@ from adapters.anthropic import AnthropicAdapter
 from adapters.gemini import GeminiAdapter
 from config import Settings
 from schemas import ChatCompletionRequest
+from .request_compression import compress_request_messages
 
 logger = logging.getLogger("headrouter.chat")
 
@@ -53,6 +54,12 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
 
     route = settings.resolve(payload.model, getattr(request.state, "gateway_key", None))
     if route is None:
+        logger.warning(
+            "chat routing error method=%s path=%s model=%s status=404 code=model_not_found",
+            request.method,
+            request.url.path,
+            payload.model,
+        )
         return _error(
             404,
             f"The model `{payload.model}` does not exist or is not routed. "
@@ -64,24 +71,19 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     try:
         adapter = get_adapter(route.provider, settings)
     except KeyError:
+        logger.warning(
+            "chat routing error method=%s path=%s provider=%s status=404 code=provider_not_found",
+            request.method,
+            request.url.path,
+            route.provider,
+        )
         return _error(404, f"Unknown provider `{route.provider}`.", "invalid_request_error", "provider_not_found")
 
     body = payload.model_dump(exclude_none=True)
     body["model"] = route.model
     body.pop("n", None)
 
-    compression_result = state.compression.maybe_compress(body.get("messages") or [], route.model)
-    body["messages"] = compression_result.messages
-    state.metrics.observe_compression(
-        compression_result.tokens_before, compression_result.tokens_after, compression_result.applied
-    )
-    if compression_result.applied:
-        logger.info(
-            "compressed context %d -> %d tokens (%.1f%% saved)",
-            compression_result.tokens_before,
-            compression_result.tokens_after,
-            100 * compression_result.tokens_saved / max(1, compression_result.tokens_before),
-        )
+    compression_result = compress_request_messages(state, body, route.model, logger)
 
     started = time.perf_counter()
 
@@ -100,11 +102,26 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
         result = await adapter.complete(state.http_client, body)
     except AdapterError as exc:
         state.metrics.observe_request(route.provider, exc.status_code, time.perf_counter() - started)
-        logger.warning("upstream %s error %s: %s", route.provider, exc.status_code, exc.message)
+        logger.warning(
+            "chat upstream error method=%s path=%s provider=%s model=%s status=%s body=%r",
+            request.method,
+            request.url.path,
+            route.provider,
+            route.model,
+            exc.status_code,
+            exc.message,
+        )
         return _error(exc.status_code, exc.message, "upstream_error")
     except Exception as exc:  # connection failures etc.
         state.metrics.observe_request(route.provider, 502, time.perf_counter() - started)
-        logger.exception("upstream request failed")
+        logger.exception(
+            "chat request failed method=%s path=%s provider=%s model=%s status=502 error=%s",
+            request.method,
+            request.url.path,
+            route.provider,
+            route.model,
+            exc,
+        )
         return _error(502, f"Upstream request failed: {exc}", "upstream_error")
 
     state.metrics.observe_request(route.provider, 200, time.perf_counter() - started)

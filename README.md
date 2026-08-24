@@ -14,8 +14,6 @@ Works with any OpenAI-compatible client: Claude Code, OpenCode, Cline, Aider, Ro
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
-# optional, enables real compression (otherwise gateway estimates tokens and passes through):
-.venv/bin/pip install "headroom-ai>=0.36"
 
 export OPENAI_API_KEY=sk-...
 export GATEWAY_ROUTES="gpt4o=openai:gpt-4o,sonnet=anthropic:claude-sonnet-4"
@@ -100,14 +98,16 @@ A `keys` section in the same JSON maps gateway API keys (the keys your clients s
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama endpoint (no key needed) |
 | `COMPRESSION_ENABLED` | `1` | Enable headroom compression |
 | `COMPRESSION_THRESHOLD_TOKENS` | `0` | Compress only when input exceeds this token budget; `0` = always compress |
+| `COMPRESSION_STRATEGY` | `coding` | Headroom routing profile: `coding` (recommended), `balanced`, `general`, `agent-90` (aggressive), or `default` (legacy router) |
 | `REQUEST_TIMEOUT_SECONDS` | `300` | Upstream timeout |
 
 Models can also be addressed directly as `provider:model`, e.g. `"model": "anthropic:claude-sonnet-4"`.
 
 ## Endpoints
 
-- `POST /v1/chat/completions` — chat completions with compression + provider translation (streaming and non-streaming)
-- **Any other path** — transparently proxied: the request is forwarded verbatim (method, path, query, body, streaming response) to the resolved provider with only the base URL and auth swapped. The target provider is resolved from the body's `model` (rewritten to the routed model name), the API-key→provider binding, or `GATEWAY_DEFAULT_ROUTE`. So `/v1/embeddings`, `/v1/messages` (Anthropic-native), `/v1/responses`, files, audio, etc. all work as if pointed directly at the provider.
+- `POST /v1/chat/completions` — OpenAI chat completions with compression + provider translation (streaming and non-streaming)
+- `POST /v1/messages` — native Anthropic Messages requests with the same message compression, metrics, logging, and `X-Compression-Applied` response header; native system prompts, tools, content blocks, query parameters, and response format are preserved.
+- **Any other path** — transparently proxied: the request is forwarded verbatim (method, path, query, body, streaming response) to the resolved provider with only the base URL and auth swapped. The target provider is resolved from the body's `model` (rewritten to the routed model name), the API-key→provider binding, or `GATEWAY_DEFAULT_ROUTE`. So `/v1/embeddings`, `/v1/responses`, files, audio, etc. all work as if pointed directly at the provider.
 - `GET /v1/models` — configured aliases
 - `GET /health` — liveness + compression engine status
 - `GET /metrics` — Prometheus text format (requests, latency, tokens, compression savings)
@@ -117,7 +117,7 @@ Models can also be addressed directly as `provider:model`, e.g. `"model": "anthr
 - **Compression never blocks a request**: any headroom failure degrades to passthrough.
 - Non-OpenAI providers get full format translation: messages, system prompts, tools / tool calls / tool results, streaming SSE — all converted to/from OpenAI wire format.
 - Upstream errors are propagated with their original status codes in an OpenAI-style error body.
-- `X-Compression-Applied: true|false` response header indicates whether compression ran.
+- `X-Compression-Applied: true|false` response header on Chat Completions and Anthropic Messages indicates whether compression reduced the request context.
 
 ## Docker
 
@@ -128,8 +128,6 @@ docker run -p 8000:8000 \
   -e GATEWAY_ROUTES="gpt4o=openai:gpt-4o" \
   headrouter
 ```
-
-For compression inside the container, uncomment the `headroom-ai` line in the `Dockerfile`.
 
 ## Development
 

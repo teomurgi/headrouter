@@ -14,6 +14,7 @@ async def health(request: Request):
         "compression": {
             "enabled": state.settings.compression_enabled,
             "engine_available": state.compression.engine_available,
+            "strategy": state.settings.compression_strategy,
         },
         "routed_models": len(state.settings.routes),
         "providers": sorted(state.settings.known_provider_names()),

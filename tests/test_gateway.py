@@ -1,4 +1,5 @@
 import json
+import logging
 
 import httpx
 
@@ -10,6 +11,7 @@ def test_health_no_auth_required(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+    assert r.json()["compression"]["strategy"] == "coding"
 
 
 def test_models_list(client):
@@ -41,6 +43,22 @@ def test_auth_x_api_key(client):
         json={"model": "gpt4o", "messages": [{"role": "user", "content": "hi"}]},
     )
     assert r.status_code == 200
+
+
+def test_validation_error_is_logged_without_request_content(client, caplog):
+    secret_content = "do-not-log-this-message"
+
+    with caplog.at_level(logging.WARNING, logger="headrouter"):
+        response = client.post(
+            "/v1/chat/completions",
+            headers=auth_headers(),
+            json={"model": "gpt4o", "messages": secret_content},
+        )
+
+    assert response.status_code == 422
+    assert "request validation error" in caplog.text
+    assert "messages" in caplog.text
+    assert secret_content not in caplog.text
 
 
 def test_unknown_model_404(settings, captured):
