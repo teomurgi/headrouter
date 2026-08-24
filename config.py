@@ -214,7 +214,7 @@ class Settings:
         base_urls: dict[str, str] = {}
         api_keys: dict[str, str] = {}
         for provider, (key_var, default_url) in PROVIDER_DEFAULTS.items():
-            base_urls[provider] = get(f"{provider.upper()}_BASE_URL", default_url) or default_url
+            base_urls[provider] = get(f"{provider.upper()}_BASE_URL", default_url).rstrip("/") or default_url
             if key_var:
                 api_keys[provider] = env.get(key_var, "")
 

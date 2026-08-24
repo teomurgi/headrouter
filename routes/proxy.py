@@ -44,6 +44,10 @@ HOP_BY_HOP = {
 
 RESPONSE_HEADERS_TO_DROP = {"content-length", "transfer-encoding", "connection", "content-encoding"}
 
+# Bodies up to this size may be buffered for JSON model inspection/rewriting;
+# anything larger is streamed through without buffering.
+MAX_PEEK_BYTES = 64 * 1024
+
 
 def _resolve_route(request: Request, body: bytes, settings: Settings):
     """Return (provider, target_model) or None."""
@@ -70,7 +74,7 @@ def _target_url(base_url: str, path: str, is_openai_compat: bool, query: str) ->
     # OpenAI-compatible base URLs already include the /v1 prefix; avoid /v1/v1/...
     if is_openai_compat and (target == "/v1" or target.startswith("/v1/")):
         target = target[3:]
-    url = base_url + target
+    url = base_url.rstrip("/") + target
     if query:
         url += "?" + query
     return url
@@ -104,12 +108,30 @@ async def proxy_all(path: str, request: Request):
     state = request.app.state
     settings: Settings = state.settings
 
+    # A body may accompany any method (DELETE with a body is legal); detect
+    # its presence via headers rather than assuming method semantics.
+    content_length = request.headers.get("content-length")
+    has_body = (
+        (content_length is not None and content_length != "" and int(content_length) > 0)
+        or "transfer-encoding" in request.headers
+    )
+    json_content = "json" in (request.headers.get("content-type") or "").lower()
+    bounded = content_length is not None and int(content_length) <= MAX_PEEK_BYTES
+
     body = b""
-    if request.method in ("POST", "PUT", "PATCH"):
+    request_stream = None
+    if has_body and json_content and bounded:
+        # Small JSON body: read it (bounded) so model-based routing and
+        # model rewriting keep working.
         body = await request.body()
+    elif has_body:
+        # Large or unbounded body: stream it through without buffering.
+        request_stream = request.stream()
 
     resolved = _resolve_route(request, body, settings)
     if resolved is None:
+        if request_stream is not None:
+            await request_stream.aclose()
         return JSONResponse(
             {
                 "error": {
@@ -136,6 +158,8 @@ async def proxy_all(path: str, request: Request):
     try:
         info = settings.endpoint(provider)
     except KeyError:
+        if request_stream is not None:
+            await request_stream.aclose()
         return JSONResponse(
             {"error": {"message": f"Unknown provider `{provider}`.", "type": "invalid_request_error"}},
             status_code=404,
@@ -148,7 +172,7 @@ async def proxy_all(path: str, request: Request):
     upstream_request = state.http_client.build_request(
         request.method,
         url,
-        content=body or None,
+        content=body if body else request_stream,
         headers=headers,
     )
     try:
@@ -168,14 +192,21 @@ async def proxy_all(path: str, request: Request):
             async for chunk in upstream.aiter_bytes():
                 yield chunk
         finally:
+            # Also closes the upstream cleanly if the client disconnects mid-stream.
             await upstream.aclose()
 
-    passthrough_headers = {
-        k: v for k, v in upstream.headers.items() if k.lower() not in RESPONSE_HEADERS_TO_DROP
-    }
-    return StreamingResponse(
+    passthrough_headers = [
+        (k, v)
+        for k, v in upstream.headers.multi_items()
+        if k.lower() not in RESPONSE_HEADERS_TO_DROP
+    ]
+    response = StreamingResponse(
         stream_bytes(),
         status_code=upstream.status_code,
-        headers=passthrough_headers,
         background=None,
     )
+    # Assign raw headers so repeated fields (e.g. Set-Cookie) stay distinct.
+    response.raw_headers = [
+        (k.encode("latin-1"), v.encode("latin-1")) for k, v in passthrough_headers
+    ]
+    return response
