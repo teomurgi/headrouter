@@ -164,13 +164,6 @@
     <div id="key-form-host"></div>
 
     <div class="diff" id="diff" role="region" aria-label="Pending changes" hidden></div>
-    <div class="banner" id="stage-bar" role="status" hidden>
-      <span class="msg" id="stage-msg"></span>
-      <button class="act" id="discard">Discard</button>
-      <button class="act" id="validate">Validate</button>
-      <button class="act primary" id="apply">Apply</button>
-      <span class="note" id="apply-note"></span>
-    </div>
     <div id="stage-live" aria-live="polite" class="sr"></div>
   </section>
 
@@ -180,10 +173,20 @@
       <h2>Providers</h2>
       <span class="hint">where requests go — only the env-var name is stored; the value lives in the server's environment</span>
       <span class="spacer"></span>
+      <button class="act" id="add-provider">+ Add provider</button>
       <button class="act" id="refresh-health">Test connections</button>
     </div>
     <div id="provider-list"></div>
+    <div id="provider-form-host"></div>
   </section>
+
+  <!-- shared staging bar (Keys & Aliases + Providers) -->
+  <div class="banner" id="stage-bar" role="status" hidden>
+    <span class="msg" id="stage-msg"></span>
+    <button class="act" id="discard">Discard</button>
+    <button class="act" id="validate">Validate</button>
+    <button class="act primary" id="apply">Apply</button>
+  </div>
 </main>
 
 <div id="modal-host"></div>
@@ -243,6 +246,16 @@ function renderDiff() {
     else if (JSON.stringify(sk.get(n)) !== JSON.stringify(k)) lines.push(`<div class="add">~ key ${esc(n)}: granted ${esc((k.aliases || []).join(", "))}</div>`);
   }
   for (const [n] of sk) if (!tk.has(n)) lines.push(`<div class="del">- revoke key ${esc(n)}</div>`);
+  const sp = new Map((state.saved.providers || []).map(p => [p.name, p]));
+  const tp = new Map(((state.staged || {}).providers || []).map(p => [p.name, p]));
+  for (const [n, p] of tp) {
+    if (!sp.has(n)) lines.push(`<div class="add">+ provider ${esc(n)} (${esc(p.type)}) ${esc(p.base_url)}</div>`);
+    else if (JSON.stringify(sp.get(n)) !== JSON.stringify(p)) lines.push(`<div class="add">~ provider ${esc(n)}: ${esc(p.type)} ${esc(p.base_url)}${p.api_key_env ? ` · env ${esc(p.api_key_env)}` : ""}</div>`);
+  }
+  for (const [n, p] of sp) if (!tp.has(n)) {
+    const affected = Object.entries(state.saved.aliases || {}).filter(([, t2]) => t2.startsWith(n + ":")).map(([a]) => a);
+    lines.push(`<div class="del">- provider ${esc(n)}${affected.length ? ` (${affected.length} alias(es) dangle: ${esc(affected.join(", "))})` : ""}</div>`);
+  }
   box.innerHTML = `<div style="color:var(--muted)">Pending changes:</div>` + lines.join("");
   box.hidden = false;
   bar.hidden = false;
@@ -316,23 +329,27 @@ function renderProviders() {
   const cfg = state.staged || state.saved;
   const h = state.health;
   const box = $("provider-list");
-  const aliasCount = (p) => Object.values(cfg.aliases || {}).filter(t => t.startsWith(p + ":")).map(t => t.split(":")[0]);
+  const aliasesOf = (p) => Object.entries(cfg.aliases || {}).filter(([, t]) => t.startsWith(p + ":")).map(([a]) => a);
+  const isNew = (p) => !(state.saved.providers || []).some(x => x.name === p.name);
   box.innerHTML = (cfg.providers || []).map(p => {
     const info = h && h.providers.find(x => x.name === p.name);
-    const affected = aliasCount(p.name);
+    const affected = aliasesOf(p.name);
     const health = info
       ? (info.reachable
           ? `<span class="dot ok"></span> reachable (${esc(info.detail)})`
           : `<span class="dot err"></span> unreachable — ${affected.length} alias${affected.length === 1 ? "" : "es"} affected: ${esc(affected.join(", ") || "none")}`)
       : `<span class="dot unknown"></span> health unknown`;
-    const keys = (cfg.keys || []).filter(k => (k.aliases || []).some(a => (cfg.aliases || {})[a] && cfg.aliases[a].startsWith(p.name + ":"))).map(k => esc(k.name || k.api_key_env));
-    return `<div class="card">
-      <div class="head"><span class="keyname">${esc(p.name)}</span><span class="state live">● ${esc(p.type)}</span></div>
+    const keys = (cfg.keys || []).filter(k => (k.aliases || []).some(a => aliasesOf(p.name).includes(a))).map(k => esc(k.name || k.api_key_env));
+    return `<div class="card ${isNew(p) ? "staged" : ""}">
+      <div class="head"><span class="keyname">${esc(p.name)}</span>
+        <span class="state ${isNew(p) ? "staged" : "live"}">${isNew(p) ? "◐ staged" : "● " + esc(p.type)}</span>
+        <button class="ghost" data-editprovider="${esc(p.name)}" aria-label="Edit provider ${esc(p.name)}">✎ edit</button>
+        <button class="ghost" data-delprovider="${esc(p.name)}" aria-label="Remove provider ${esc(p.name)}">✕ remove</button></div>
       <div class="meta">${esc(p.base_url)} · key env: <code>${esc(p.api_key_env || "—")}</code></div>
       <div class="meta">${health}</div>
       <div class="meta">keys via aliases (read-only): ${keys.length ? keys.join(", ") : "none"} — edit grants on Keys &amp; Aliases</div>
     </div>`;
-  }).join("") || `<div class="explain">No providers configured.</div>`;
+  }).join("") || `<div class="explain">No providers yet — "+ Add provider" stages your first upstream.</div>`;
 }
 
 // ---------- dashboard ----------
@@ -526,6 +543,60 @@ document.addEventListener("click", async (e) => {
     announce("applied — in-flight requests may still complete");
     return;
   }
+  if (t.id === "add-provider" || t.getAttribute("data-editprovider")) {
+    const existing = t.id === "add-provider" ? null
+      : working().providers.find(p => p.name === t.getAttribute("data-editprovider"));
+    const presets = ["openai", "anthropic", "gemini", "openrouter", "ollama", "openai-compat"];
+    const defaults = {openai: "https://api.openai.com/v1", anthropic: "https://api.anthropic.com",
+      gemini: "https://generativelanguage.googleapis.com", openrouter: "https://openrouter.ai/api/v1",
+      ollama: "http://localhost:11434/v1", "openai-compat": ""};
+    const p = existing || {name: "", type: "openai", base_url: "", api_key_env: ""};
+    const origName = existing ? existing.name : null;
+    stageForm("provider-form-host", [
+      {id: "name", name: "provider", label: "Name"},
+      {id: "type", name: "type", label: "Type", options: presets},
+      {id: "base_url", name: "base_url", label: "Base URL", options: existing ? undefined : Object.values(defaults).filter(Boolean)},
+      {id: "api_key_env", name: "api_key_env", label: "API key env-var name"},
+    ], "Only the variable name is stored; the value lives in the server's environment.", (v) => {
+      const name = (v.name || "").trim(), base = (v.base_url || "").trim(), env = (v.api_key_env || "").trim();
+      if (!name || !base) { announce("provider needs a name and base URL"); return; }
+      const providers = working().providers = working().providers || [];
+      if (origName) {
+        // rename re-points aliases and keys follow by name indirection
+        if (origName !== name) {
+          working().aliases = Object.fromEntries(Object.entries(working().aliases || {})
+            .map(([a, tgt]) => [a, tgt.startsWith(origName + ":") ? name + ":" + tgt.slice(origName.length + 1) : tgt]));
+          const idx = providers.findIndex(x => x.name === origName);
+          providers[idx] = {name, type: v.type, base_url: base, api_key_env: env};
+        } else {
+          Object.assign(providers.find(x => x.name === name), {type: v.type, base_url: base, api_key_env: env});
+        }
+        renderProviders(); announceStage(`staged: edit provider ${name}`);
+      } else {
+        if (providers.some(x => x.name === name)) { announce(`provider '${name}' already exists`); return; }
+        providers.push({name, type: v.type, base_url: base, api_key_env: env});
+        renderProviders(); announceStage(`staged: add provider ${name}`);
+      }
+    });
+    // prefill for edit / preset defaults
+    const f = $("provider-form-host").querySelector("form");
+    if (f) {
+      if (p.name) { f.querySelector("#sf-name").value = p.name; }
+      f.querySelector("#sf-type").value = p.type;
+      f.querySelector("#sf-base_url").value = p.base_url || "";
+      f.querySelector("#sf-api_key_env").value = p.api_key_env || "";
+    }
+    return;
+  }
+  const delProvider = t.getAttribute("data-delprovider");
+  if (delProvider) {
+    const affected = Object.entries(state.saved.aliases || {}).filter(([, t2]) => t2.startsWith(delProvider + ":")).map(([a]) => a);
+    if (affected.length && !confirm(`Remove provider '${delProvider}'? ${affected.length} alias${affected.length === 1 ? "" : "es"} point at it (${affected.join(", ")}) — validation will reject dangling aliases.`)) return;
+    working().providers = (working().providers || []).filter(p => p.name !== delProvider);
+    renderProviders(); announceStage(`staged: remove provider ${delProvider}${affected.length ? ` (${affected.length} alias(es) will dangle)` : ""}`);
+    return;
+  }
+
   if (t.id === "refresh-health") { await loadHealth(true); renderProviders(); renderDashboard(); return; }
   for (const f of ["all", "compressed", "errors"]) {
     if (t.id === `filter-${f}`) {
