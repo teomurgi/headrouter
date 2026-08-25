@@ -15,14 +15,23 @@ logger = logging.getLogger("headrouter.auth")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, api_keys: Container[str]):
+    def __init__(self, app, api_keys: Container[str] | None = None, app_ref=None):
         super().__init__(app)
+        # With an app_ref the key set is read from live settings each request,
+        # so an atomic config swap (Apply) takes effect without a restart.
+        self._app_ref = app_ref
         self.api_keys = api_keys
 
+    def _effective_keys(self) -> Container[str]:
+        if self._app_ref is not None:
+            return self._app_ref.state.settings.effective_api_keys()
+        return self.api_keys or frozenset()
+
     async def dispatch(self, request: Request, call_next):
-        if self.api_keys and request.url.path not in PUBLIC_PATHS:
+        api_keys = self._effective_keys()
+        if api_keys and request.url.path not in PUBLIC_PATHS:
             token = self._extract_token(request)
-            if token is None or token not in self.api_keys:
+            if token is None or token not in api_keys:
                 logger.warning(
                     "authentication error method=%s path=%s status=401 reason=%s client=%s",
                     request.method,

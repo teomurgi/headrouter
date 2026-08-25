@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from compression_service import CompressionService
 from config import Settings
+from config_store import ConfigStore
 from middleware import AuthMiddleware, Metrics
 from routes import api_router
 
@@ -22,7 +23,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 logger = logging.getLogger("headrouter")
 
 
-def create_app(settings: Settings | None = None, http_client: httpx.AsyncClient | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    config_store: "ConfigStore | None" = None,
+) -> FastAPI:
     settings = settings or Settings.from_env()
     owns_client = http_client is None
 
@@ -46,6 +51,9 @@ def create_app(settings: Settings | None = None, http_client: httpx.AsyncClient 
 
     app = FastAPI(title="Headrouter", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.state.config_store = config_store
+    if config_store is not None:
+        config_store.on_apply(lambda s: setattr(app.state, "settings", s))
     app.state.compression = CompressionService(
         enabled=settings.compression_enabled,
         threshold_tokens=settings.compression_threshold_tokens,
@@ -54,7 +62,7 @@ def create_app(settings: Settings | None = None, http_client: httpx.AsyncClient 
     app.state.metrics = Metrics()
 
     if settings.effective_api_keys():
-        app.add_middleware(AuthMiddleware, api_keys=settings.effective_api_keys())
+        app.add_middleware(AuthMiddleware, api_keys=None, app_ref=app)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
