@@ -24,7 +24,7 @@ Key       ::= { api_key | api_key_env, aliases: [alias names] }
 - **INV-2 (List/error agreement).** `GET /v1/models` for key K lists exactly `∩(global aliases, K.aliases)`, and the deny error for K names exactly that same set. Both derive from one function; they can never disagree.
 - **INV-3 (Every key ≥ 1 alias).** Validation (startup and admin apply) rejects a key with an empty alias set. Aliases referenced by a key must exist.
 - **INV-4 (Atomic config lifecycle).** Config changes go: build new immutable `Settings` → validate → single atomic swap of `app.state.settings` (under an asyncio lock). In-flight requests finish against the old snapshot. Disk writes are tmp-file + `os.replace`.
-- **INV-5 (No secrets to the browser).** Admin API sends/accepts `api_key_env` names only. `PUT /admin/config` rejects any `api_key` value field.
+- **INV-5 (No secrets to the browser)** — two clauses. (1) **Reads:** no admin API response ever contains a secret value — `sanitized_config()` is the enforcement point; provider credentials surface as `api_key_set: true` (or the env-var name), gateway keys as generated-once values. Absolute, unchanged. (2) **Writes:** `PUT /admin/config` accepts a pasted `api_key` value **for providers only, write-only** (stored server-side in providers.json, never echoed back; blank-on-edit keeps the existing value). Gateway *keys* still reject raw values outright. The env-var path remains supported for providers.
 - **INV-6 (Log is metadata-only).** The request ring buffer stores no request/response bodies — headers-extracted metadata only (see §5).
 - **INV-7 (No database).** All state is config file + in-memory. Ring buffers are bounded (`deque(maxlen=N)`).
 
