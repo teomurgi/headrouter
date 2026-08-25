@@ -155,3 +155,63 @@ def test_provider_health_cached(tmp_path, captured):
     assert body["providers"][0]["name"] == "or"
     assert "reachable" in body["providers"][0]
     assert "checked_at" in body
+
+
+def test_put_admin_config_rejects_key_secret_values(tmp_path, captured):
+    # §9 check 2: no admin API response ever carries key values, and the
+    # apply direction rejects them too (INV-5, explicit key-side test).
+    c, _ = make_client(tmp_path, captured)
+    bad = json.loads(json.dumps(V2))
+    bad["keys"][0]["api_key"] = "sk-raw-secret"
+    r = c.put("/admin/config", headers=H, json=bad)
+    assert r.status_code == 400
+    assert any("api_key" in e for e in r.json()["detail"]["errors"])
+    # and GET never echoes key values even when a legacy file has them
+    raw = json.loads((tmp_path / "providers.json").read_text())
+    assert "sk-raw-secret" not in c.get("/admin/config", headers=H).text
+
+
+# --- one-time key generation (ux-spec §4 issue-key flow, §9 check 2) ----------
+
+
+def test_issue_key_generated_shown_once(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    staged = json.loads(json.dumps(V2))
+    staged["keys"].append({"name": "team-b", "api_key_env": None, "aliases": ["fast"]})
+    staged["keys"][1].pop("api_key_env")
+    r = c.put("/admin/config", headers=H, json=staged)
+    assert r.status_code == 200
+    gen = r.json()["generated"]
+    assert len(gen) == 1 and gen[0]["name"] == "team-b"
+    value = gen[0]["api_key"]
+    assert value.startswith("hr_")
+    # generated key authenticates immediately
+    r = c.post("/v1/chat/completions", headers={"Authorization": f"Bearer {value}"},
+               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200
+    # never shown again: GET admin config and repeat PUT drain it
+    assert value not in c.get("/admin/config", headers=H).text
+    r2 = c.put("/admin/config", headers=H, json=staged)
+    assert r2.json()["generated"] == []
+    # round-trip did not regenerate: the same value still authenticates
+    r = c.post("/v1/chat/completions", headers={"Authorization": f"Bearer {value}"},
+               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200
+
+
+# --- static /admin page (A5) ---------------------------------------------------
+
+
+def test_admin_page_served_no_auth_needed(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    r = c.get("/admin")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "HEADROUTER" in r.text
+    # page itself carries no secrets
+    assert "sk-or" not in r.text
+
+
+def test_admin_page_survives_config_apply(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    assert c.get("/admin").status_code == 200

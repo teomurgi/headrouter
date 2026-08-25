@@ -10,7 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 
-PUBLIC_PATHS = {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+PUBLIC_PATHS = {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/admin"}
 logger = logging.getLogger("headrouter.auth")
 
 

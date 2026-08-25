@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from config import ConfigError
 
@@ -45,6 +46,11 @@ def _reject_secrets(data: dict) -> list[str]:
     return errors
 
 
+@router.get("/admin")
+async def admin_page():
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "admin.html", media_type="text/html")
+
+
 @router.get("/admin/config")
 async def get_config(request: Request):
     return _store(request).sanitized_config()
@@ -70,7 +76,8 @@ async def apply_config(request: Request):
         await store.apply_async(data)
     except ConfigError as exc:
         return JSONResponse({"detail": {"errors": [str(exc)]}}, status_code=400)
-    return {"applied": True, "migrated_keys": sorted(store.migrated_keys)}
+    return {"applied": True, "migrated_keys": sorted(store.migrated_keys),
+            "generated": store.pop_generated()}
 
 
 @router.get("/admin/log")

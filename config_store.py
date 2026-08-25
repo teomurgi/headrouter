@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import tempfile
 import threading
 from dataclasses import replace
@@ -34,6 +35,7 @@ class ConfigStore:
         self._migrated_keys = {k for k, b in keys.items() if b.legacy_provider_grant}
         self._listeners: list = []
         self._raw: dict = self._read_raw()
+        self._last_generated: list[dict] = []
 
     def on_apply(self, callback) -> None:
         """Register a callable(Settings) invoked after each atomic swap."""
@@ -54,6 +56,8 @@ class ConfigStore:
         data = json.loads(json.dumps(self._raw))  # deep copy
         for p in data.get("providers", []):
             p.pop("api_key", None)
+        for k in data.get("keys", []):
+            k.pop("api_key", None)
         return data
 
     def _build(self, defs, keys, aliases) -> Settings:
@@ -83,6 +87,22 @@ class ConfigStore:
         for p in data.get("providers", []):
             if p.get("api_key"):
                 raise ConfigError("providers must reference 'api_key_env', not embed 'api_key' values")
+        # Keys with neither api_key nor api_key_env: reuse the stored value if
+        # this is an existing key (GET strips values, so round-trips must not
+        # regenerate them); otherwise generate one server-side (issue-key
+        # flow) — returned once, stored in the file, stripped from every GET.
+        self._last_generated = []
+        existing = {b.name: b.api_key for b in self._settings.key_bindings.values() if b.name}
+        for k in data.get("keys", []):
+            if not isinstance(k, dict) or k.get("api_key") or k.get("api_key_env"):
+                continue
+            name = str(k.get("name") or "")
+            if name in existing:
+                k["api_key"] = existing[name]
+                continue
+            value = "hr_" + secrets.token_urlsafe(24)
+            k["api_key"] = value
+            self._last_generated.append({"name": name or "key", "api_key": value})
         defs, keys, aliases = load_config_v2(data, env=self._env)
         return defs, keys, aliases
 
@@ -131,3 +151,9 @@ class ConfigStore:
     def validate(self, data: dict) -> list[str]:
         """Dry-run validation only (POST /admin/config/validate)."""
         return validate_config(data)
+
+    def pop_generated(self) -> list[dict]:
+        """One-time generated key values from the last apply (drained on read)."""
+        out = self._last_generated
+        self._last_generated = []
+        return out

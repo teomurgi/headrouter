@@ -13,6 +13,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from dataclasses import replace
+
 from compression_service import CompressionService
 from config import Settings
 from config_store import ConfigStore
@@ -31,6 +33,8 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     owns_client = http_client is None
+    if config_store is None and settings._providers_source:
+        config_store = ConfigStore(settings._providers_source, base_settings=replace(settings, custom_providers={}, key_bindings={}, aliases={}))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

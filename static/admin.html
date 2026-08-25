@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headrouter Admin</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0d1117; --panel:#161b22; --line:#21262d; --fg:#c9d1d9; --muted:#8b949e;
+    --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149; --purple:#a371f7;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { font:13px/1.45 var(--mono); background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:14px; color:#fff; letter-spacing:.5px; }
+  nav.top { display:flex; gap:4px; }
+  nav.top button { font:inherit; background:none; color:var(--muted); border:1px solid transparent; padding:4px 12px; border-radius:6px; cursor:pointer; }
+  nav.top button:hover { color:#fff; background:var(--panel); }
+  nav.top button[aria-selected="true"] { color:#fff; background:var(--panel); border-color:var(--line); }
+  .spacer{flex:1}
+  .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); color:var(--muted); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  .pill.warn { color:var(--warn); border-color:var(--warn); }
+  main { padding:16px; max-width: 980px; }
+  [hidden] { display:none !important; }
+  .bar { display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+  .bar h2 { font-size:15px; color:#fff; }
+  .bar .hint { color:var(--muted); font-size:12px; }
+  button.act { font:inherit; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 14px; cursor:pointer; }
+  button.act:hover { border-color:var(--accent); color:#fff; }
+  button.act.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+  button.act[aria-pressed="true"] { border-color:var(--warn); color:var(--warn); }
+  .explain { color:var(--muted); font-size:12px; margin-bottom:16px; }
+  h3.sec { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin:18px 0 10px; }
+
+  /* KPI row */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:16px; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi .v { font-size:18px; color:#fff; }
+  .kpi .l { font-size:11px; color:var(--muted); }
+
+  /* rail + table */
+  .cols { display:grid; grid-template-columns: 1fr 240px; gap:16px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th { text-align:left; color:var(--muted); font-weight:normal; border-bottom:1px solid var(--line); padding:4px 8px; }
+  td { padding:4px 8px; border-bottom:1px solid var(--line); }
+  tr.error td { color:var(--err); }
+  tr:hover td { background:var(--panel); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--purple); color:var(--purple); border-radius:999px; padding:2px 6px 2px 10px; font-size:12px; }
+  .chip button { background:none; border:none; color:inherit; padding:0 4px; cursor:pointer; font-size:12px; }
+  .chip.off, .addchip { border-color:var(--line); color:var(--muted); border-style:dashed; background:none; cursor:pointer; }
+  .rail .box { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px; }
+  .rail .box h4 { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+  .rail .item { display:block; padding:2px 0; color:var(--fg); font-size:12px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .dot.ok { background:var(--ok); } .dot.err { background:var(--err); } .dot.unknown { background:var(--muted); }
+
+  /* cards */
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .card.staged { border-color:var(--warn); }
+  .card .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .keyname { font-size:14px; color:#fff; background:var(--bg); border:1px dashed var(--line); border-radius:6px; padding:3px 10px; }
+  .state { font-size:11px; padding:1px 8px; border-radius:10px; border:1px solid var(--line); color:var(--muted); margin-left:auto; }
+  .state.live { color:var(--ok); border-color:var(--ok); }
+  .state.staged { color:var(--warn); border-color:var(--warn); }
+  .ghost { color:var(--muted); background:none; border:none; padding:2px 6px; cursor:pointer; font:inherit; }
+  .ghost:hover { color:var(--err); }
+  .meta { margin-top:8px; font-size:12px; color:var(--muted); }
+  .badge { font-size:10px; border:1px solid var(--warn); color:var(--warn); border-radius:8px; padding:0 6px; margin-left:6px; }
+  .alias { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; display:flex; align-items:center; gap:8px; }
+  .alias .name { color:#fff; } .alias .def { color:var(--muted); font-size:12px; } .alias .n { font-size:11px; color:var(--accent); }
+  .aliases { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  label { display:block; color:var(--muted); font-size:11px; margin:8px 0 2px; }
+  input, select { font:inherit; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 8px; width:100%; }
+  input:focus, select:focus, button:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+  .diff { margin:14px 0; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:12px; white-space:pre-wrap; }
+  .diff .add { color:var(--ok); } .diff .del { color:var(--err); }
+  .banner { position:sticky; bottom:14px; display:flex; align-items:center; gap:12px; background:var(--panel); border:1px solid var(--warn); border-radius:8px; padding:10px 14px; margin-top:14px; flex-wrap:wrap; }
+  .banner .msg { flex:1; color:var(--warn); min-width:200px; }
+  .banner.err { border-color:var(--err); }
+  .banner.err .msg { color:var(--err); }
+  .banner .note { flex-basis:100%; color:var(--muted); font-size:11px; }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+
+  /* modal */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; }
+  .modal { background:var(--panel); border:1px solid var(--warn); border-radius:10px; padding:20px; max-width:520px; width:92%; }
+  .modal h3 { color:#fff; margin-bottom:8px; }
+  .modal .val { font-family:var(--mono); background:var(--bg); border:1px dashed var(--warn); border-radius:6px; padding:8px 10px; word-break:break-all; margin:10px 0; }
+  .modal .warn-copy { color:var(--warn); font-size:12px; margin-bottom:12px; }
+
+  .banner-error-page { border:1px solid var(--err); color:var(--err); border-radius:8px; padding:14px; margin:16px; }
+  .skel { background:linear-gradient(90deg,var(--panel),var(--line),var(--panel)); color:transparent; border-radius:6px; animation:pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.5; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEADROUTER</h1>
+  <nav class="top" aria-label="Pages">
+    <button id="tab-dashboard" aria-selected="true">Dashboard</button>
+    <button id="tab-keys" aria-selected="false">Keys &amp; Aliases</button>
+    <button id="tab-providers" aria-selected="false">Providers</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="pill ok" id="health-pill">● healthy</span>
+</header>
+
+<div id="auth-error" class="banner-error-page" hidden>
+  ⚠ unauthorized — check your gateway API key. The admin surface inherits gateway auth; there is no separate login.
+</div>
+
+<main>
+  <!-- Dashboard -->
+  <section id="page-dashboard" aria-label="Dashboard">
+    <div class="kpis" id="kpis"></div>
+    <div class="cols">
+      <div>
+        <div class="bar">
+          <h2>Request stream</h2>
+          <span class="spacer"></span>
+          <button class="act" id="filter-all" aria-pressed="true">all</button>
+          <button class="act" id="filter-compressed">compressed</button>
+          <button class="act" id="filter-errors">errors</button>
+          <button class="act" id="pause" aria-pressed="false">⏸ pause</button>
+        </div>
+        <table aria-label="Recent requests">
+          <thead><tr><th>time</th><th>key</th><th>alias</th><th>resolved</th><th>status</th><th>latency</th><th>tok in/out</th><th>compression</th></tr></thead>
+          <tbody id="log-body"></tbody>
+        </table>
+      </div>
+      <div class="rail" aria-label="Overview">
+        <div class="box"><h4>Keys</h4><div id="rail-keys"></div></div>
+        <div class="box"><h4>Providers</h4><div id="rail-providers"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keys & Aliases -->
+  <section id="page-keys" aria-label="Keys and aliases" hidden>
+    <div class="bar">
+      <h2>Aliases</h2>
+      <span class="hint">named model routes, defined once — clients ask for these names</span>
+      <span class="spacer"></span>
+      <button class="act" id="add-alias">+ Add alias</button>
+    </div>
+    <div class="aliases" id="alias-list" role="list" aria-label="Global aliases"></div>
+
+    <div class="bar">
+      <h2>Keys</h2>
+      <span class="hint">each downstream key is entitled to a set of aliases</span>
+      <span class="spacer"></span>
+      <button class="act" id="add-key">+ Issue key</button>
+    </div>
+    <div id="key-list"></div>
+
+    <div class="diff" id="diff" role="region" aria-label="Pending changes" hidden></div>
+    <div class="banner" id="stage-bar" role="status" hidden>
+      <span class="msg" id="stage-msg"></span>
+      <button class="act" id="discard">Discard</button>
+      <button class="act" id="validate">Validate</button>
+      <button class="act primary" id="apply">Apply</button>
+      <span class="note" id="apply-note"></span>
+    </div>
+    <div id="stage-live" aria-live="polite" class="sr"></div>
+  </section>
+
+  <!-- Providers -->
+  <section id="page-providers" aria-label="Providers" hidden>
+    <div class="bar">
+      <h2>Providers</h2>
+      <span class="hint">where requests go — only the env-var name is stored; the value lives in the server's environment</span>
+      <span class="spacer"></span>
+      <button class="act" id="refresh-health">Test connections</button>
+    </div>
+    <div id="provider-list"></div>
+  </section>
+</main>
+
+<div id="modal-host"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const state = {
+  saved: null,      // last-fetched config (GET /admin/config)
+  staged: null,     // working copy (deep clone of saved on first edit)
+  log: [], filter: "all", paused: false, lastSeq: 0,
+  health: null, migrated: new Set(),
+};
+
+// ---------- helpers ----------
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, opts));
+  if (r.status === 401) { $("auth-error").hidden = false; document.querySelector("main").hidden = true; throw new Error("unauthorized"); }
+  return r;
+}
+const clone = (x) => JSON.parse(JSON.stringify(x));
+function announce(msg) { $("stage-live").textContent = msg; }
+function esc(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
+
+function dirty() { return state.staged !== null && JSON.stringify(state.staged) !== JSON.stringify(state.saved); }
+function working() { if (state.staged === null) state.staged = clone(state.saved); return state.staged; }
+
+// ---------- config load ----------
+async function loadConfig() {
+  const r = await api("/admin/config");
+  if (!r.ok) throw new Error("config fetch failed");
+  state.saved = await r.json();
+  state.staged = null;
+  const logr = await api("/admin/log");
+  if (logr.ok) { const b = await logr.json(); state.log = b.entries; state.lastSeq = b.last_seq; }
+  renderKeys(); renderAliases(); renderProviders(); renderDashboard();
+}
+
+// ---------- staging / diff ----------
+function stagedCount() {
+  if (!dirty()) return 0;
+  const s = JSON.stringify(state.staged), v = JSON.stringify(state.saved);
+  return s === v ? 0 : 1; // coarse: any change = staged work present
+}
+function renderDiff() {
+  const box = $("diff"), bar = $("stage-bar");
+  if (!dirty()) { box.hidden = true; bar.hidden = true; return; }
+  const lines = [];
+  const sa = state.saved.aliases || {}, ta = (state.staged.aliases || {});
+  for (const k of new Set([...Object.keys(sa), ...Object.keys(ta)])) {
+    if (sa[k] !== ta[k]) lines.push(`<div class="${sa[k] === undefined ? "add" : "del"}">${sa[k] === undefined ? "+" : "-"} alias ${esc(k)} → ${esc(ta[k] || sa[k])}${sa[k] !== undefined && ta[k] !== undefined ? " (changed)" : ""}</div>`);
+  }
+  const sk = new Map((state.saved.keys || []).map(k => [k.name || k.api_key_env, k]));
+  const tk = new Map((state.staged.keys || []).map(k => [k.name || k.api_key_env, k]));
+  for (const [n, k] of tk) {
+    if (!sk.has(n)) lines.push(`<div class="add">+ issue key ${esc(n)}, granted: ${esc((k.aliases || []).join(", "))}</div>`);
+    else if (JSON.stringify(sk.get(n)) !== JSON.stringify(k)) lines.push(`<div class="add">~ key ${esc(n)}: granted ${esc((k.aliases || []).join(", "))}</div>`);
+  }
+  for (const [n] of sk) if (!tk.has(n)) lines.push(`<div class="del">- revoke key ${esc(n)}</div>`);
+  box.innerHTML = `<div style="color:var(--muted)">Pending changes:</div>` + lines.join("");
+  box.hidden = false;
+  bar.hidden = false;
+  $("stage-msg").textContent = `⚠ ${lines.length} staged change(s). Validation: every key needs ≥1 alias; alias names must be unique.`;
+  bar.classList.remove("err");
+  $("apply").disabled = false;
+}
+
+function announceStage(msg) { announce(msg); renderDiff(); }
+
+// ---------- keys & aliases render ----------
+function renderAliases() {
+  const cfg = state.staged || state.saved;
+  const useCount = {};
+  for (const k of cfg.keys || []) for (const a of k.aliases || []) useCount[a] = (useCount[a] || 0) + 1;
+  const box = $("alias-list");
+  if (!Object.keys(cfg.aliases || {}).length) {
+    box.innerHTML = `<div class="explain">No aliases yet — "+ Add alias" creates your first named model route.</div>`;
+  } else {
+    box.innerHTML = Object.entries(cfg.aliases).map(([n, t]) =>
+      `<div class="alias" role="listitem"><span class="name">${esc(n)}</span><span class="def">${esc(t)}</span><span class="n">${useCount[n] || 0} key${useCount[n] === 1 ? "" : "s"}</span><button class="ghost" data-delalias="${esc(n)}" aria-label="Delete alias ${esc(n)}">✕</button></div>`).join("");
+  }
+}
+
+function renderKeys() {
+  const cfg = state.staged || state.saved;
+  const aliases = Object.keys(cfg.aliases || {});
+  const savedNames = new Set((state.saved.keys || []).map(k => k.name));
+  const box = $("key-list");
+  if (!(cfg.keys || []).length) {
+    box.innerHTML = `<div class="explain">No keys yet — "+ Issue key" stages a scoped key for a team or client.</div>`;
+  } else {
+    box.innerHTML = (cfg.keys || []).map(k => {
+      const name = k.name || k.api_key_env || "key";
+      const isNew = !savedNames.has(k.name);
+      const migrated = state.migrated.has(k.name);
+      const chips = (k.aliases || []).map(a =>
+        `<span class="chip">${esc(a)} <button data-revoke="${esc(name)}" data-alias="${esc(a)}" aria-label="Revoke alias ${esc(a)} for ${esc(name)}">✕</button></span>`).join("");
+      const grant = `<button class="chip addchip" data-grant="${esc(name)}" aria-label="Grant alias to ${esc(name)}">+ grant alias</button>`;
+      return `<div class="card ${isNew ? "staged" : ""}">
+        <div class="head"><span class="keyname">${esc(name)}</span>
+        ${migrated ? '<span class="badge">migrated — review &amp; prune</span>' : ""}
+        <span class="state ${isNew ? "staged" : "live"}">${isNew ? "◐ staged" : "● live"}</span>
+        <button class="ghost" data-delkey="${esc(name)}" aria-label="Revoke key ${esc(name)}">✕ revoke</button></div>
+        <div class="chips" role="group" aria-label="Aliases granted to ${esc(name)}">${chips}${grant}</div>
+        <div class="meta">${isNew ? "The key value is generated on Apply and shown once — never displayed again." : `credential via <code>${esc(k.api_key_env || "server-generated value")}</code>`}</div>
+      </div>`;
+    }).join("");
+  }
+}
+
+// ---------- providers render ----------
+async function loadHealth(force) {
+  if (state.health && !force) return state.health;
+  const r = await api("/admin/health/providers");
+  if (r.ok) state.health = await r.json();
+  return state.health;
+}
+function renderProviders() {
+  const cfg = state.staged || state.saved;
+  const h = state.health;
+  const box = $("provider-list");
+  const aliasCount = (p) => Object.values(cfg.aliases || {}).filter(t => t.startsWith(p + ":")).map(t => t.split(":")[0]);
+  box.innerHTML = (cfg.providers || []).map(p => {
+    const info = h && h.providers.find(x => x.name === p.name);
+    const affected = aliasCount(p.name);
+    const health = info
+      ? (info.reachable
+          ? `<span class="dot ok"></span> reachable (${esc(info.detail)})`
+          : `<span class="dot err"></span> unreachable — ${affected.length} alias${affected.length === 1 ? "" : "es"} affected: ${esc(affected.join(", ") || "none")}`)
+      : `<span class="dot unknown"></span> health unknown`;
+    const keys = (cfg.keys || []).filter(k => (k.aliases || []).some(a => (cfg.aliases || {})[a] && cfg.aliases[a].startsWith(p.name + ":"))).map(k => esc(k.name || k.api_key_env));
+    return `<div class="card">
+      <div class="head"><span class="keyname">${esc(p.name)}</span><span class="state live">● ${esc(p.type)}</span></div>
+      <div class="meta">${esc(p.base_url)} · key env: <code>${esc(p.api_key_env || "—")}</code></div>
+      <div class="meta">${health}</div>
+      <div class="meta">keys via aliases (read-only): ${keys.length ? keys.join(", ") : "none"} — edit grants on Keys &amp; Aliases</div>
+    </div>`;
+  }).join("") || `<div class="explain">No providers configured.</div>`;
+}
+
+// ---------- dashboard ----------
+function renderDashboard() {
+  const entries = state.log.filter(e =>
+    state.filter === "all" || (state.filter === "compressed" ? e.compressed : e.status >= 400));
+  $("log-body").innerHTML = entries.slice(-50).reverse().map(e =>
+    `<tr class="${e.status >= 400 ? "error" : ""}"><td>${new Date(e.ts * 1000).toLocaleTimeString()}</td><td>${esc(e.key_name)}</td><td>${esc(e.alias)}</td><td>${esc(e.resolved)}</td><td>${e.status}</td><td>${Math.round(e.latency_ms)}ms</td><td>${e.tokens_in}/${e.tokens_out}</td><td>${e.compressed ? `▼ saved ${e.tokens_saved}` : "—"}</td></tr>`).join("")
+    || `<tr><td colspan="8" class="explain">No requests yet.</td></tr>`;
+  const cfg = state.saved || {};
+  const total = state.log.length, err = state.log.filter(e => e.status >= 400).length;
+  const lat = state.log.map(e => e.latency_ms).sort((a, b) => a - b);
+  const p = (q) => lat.length ? Math.round(lat[Math.min(lat.length - 1, Math.floor(q * lat.length))]) + "ms" : "—";
+  const tokIn = state.log.reduce((a, e) => a + e.tokens_in, 0), tokOut = state.log.reduce((a, e) => a + e.tokens_out, 0);
+  const saved = state.log.reduce((a, e) => a + e.tokens_saved, 0), comp = state.log.filter(e => e.compressed).length;
+  $("kpis").innerHTML = [
+    [total, "requests (buffer)"], [err, "errors"], [p(0.5), "latency p50"], [p(0.95), "latency p95"],
+    [tokIn, "tokens in"], [tokOut, "tokens out"], [saved, "tokens saved"], [comp, "compressed"],
+    [Object.keys(cfg.aliases || {}).length, "aliases"], [(cfg.keys || []).length, "keys"],
+  ].map(([v, l]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+  $("rail-keys").innerHTML = (cfg.keys || []).map(k =>
+    `<span class="item">● ${esc(k.name || k.api_key_env)} <span style="color:var(--muted)">→ ${(k.aliases || []).slice(0, 3).join(", ")}</span></span>`).join("") || `<span class="item" style="color:var(--muted)">no keys</span>`;
+  const h = state.health;
+  $("rail-providers").innerHTML = (cfg.providers || []).map(p => {
+    const info = h && h.providers.find(x => x.name === p.name);
+    const cls = info ? (info.reachable ? "ok" : "err") : "unknown";
+    return `<span class="item"><span class="dot ${cls}"></span>${esc(p.name)}</span>`;
+  }).join("") || `<span class="item" style="color:var(--muted)">none</span>`;
+}
+
+// ---------- log polling ----------
+async function pollLog() {
+  if (state.paused || document.hidden) return;
+  try {
+    const r = await api(`/admin/log?after=${state.lastSeq}`);
+    if (r.ok) {
+      const b = await r.json();
+      if (b.entries.length) { state.log.push(...b.entries); state.log = state.log.slice(-500); }
+      state.lastSeq = b.last_seq;
+      renderDashboard();
+    }
+  } catch (e) { /* transient; next tick retries */ }
+}
+setInterval(pollLog, 2000);
+
+// ---------- modal (one-time key) ----------
+function showGeneratedModal(gen) {
+  if (!gen || !gen.length) return;
+  const host = $("modal-host");
+  const first = gen[0];
+  host.innerHTML = `<div class="overlay" role="dialog" aria-modal="true" aria-label="Key generated">
+    <div class="modal">
+      <h3>Key “${esc(first.name)}” generated</h3>
+      <div class="val" id="gen-val">${esc(first.api_key)}</div>
+      <p class="warn-copy">⚠ Shown once, never again. Copy it now — it cannot be retrieved later.</p>
+      <button class="act" id="gen-copy">Copy</button>
+      <button class="act primary" id="gen-close">I've saved it — dismiss</button>
+    </div></div>`;
+  const overlay = host.querySelector(".overlay");
+  $("gen-copy").focus();
+  $("gen-copy").onclick = () => { navigator.clipboard.writeText(first.api_key); announce("key value copied"); $("gen-copy").textContent = "Copied ✓"; };
+  const close = () => { host.innerHTML = ""; $("gen-copy") && announce("modal dismissed"); };
+  $("gen-close").onclick = close;
+  overlay.onkeydown = (e) => {
+    if (e.key === "Escape") { if (confirm("Dismiss without copying? The value will never be shown again.")) close(); }
+    if (e.key === "Tab") { // focus trap
+      const f = host.querySelectorAll("button");
+      const i = [...f].indexOf(document.activeElement);
+      e.preventDefault();
+      f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+    }
+  };
+}
+
+// ---------- actions ----------
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("button"); if (!t) return;
+  const w = working;
+
+  if (t.id === "tab-dashboard" || t.id === "tab-keys" || t.id === "tab-providers") {
+    for (const id of ["dashboard", "keys", "providers"]) {
+      $(`page-${id}`).hidden = t.id !== `tab-${id}`;
+      $(`tab-${id}`).setAttribute("aria-selected", t.id === `tab-${id}`);
+    }
+    return;
+  }
+  if (t.id === "add-alias") {
+    const name = prompt("Alias name:"); if (!name) return;
+    const cfg = state.saved;
+    const target = prompt(`Target 'provider:model' (providers: ${(cfg.providers || []).map(p => p.name).join(", ") || "none"}):`);
+    if (!target) return;
+    working().aliases = working().aliases || {};
+    working().aliases[name] = target;
+    renderAliases(); announceStage(`staged: alias ${name} → ${target}`);
+    return;
+  }
+  const delAlias = t.getAttribute("data-delalias");
+  if (delAlias) { delete working().aliases[delAlias]; renderAliases(); announceStage(`staged: delete alias ${delAlias}`); return; }
+
+  if (t.id === "add-key") {
+    const name = prompt("Key name (display only):"); if (!name) return;
+    working().keys = working().keys || [];
+    working().keys.push({name, aliases: []});
+    renderKeys(); announceStage(`staged: issue key ${name} — grant at least one alias`);
+    return;
+  }
+  const delKey = t.getAttribute("data-delkey");
+  if (delKey) { working().keys = working().keys.filter(k => (k.name || k.api_key_env) !== delKey); renderKeys(); announceStage(`staged: revoke key ${delKey}`); return; }
+
+  const revoke = t.getAttribute("data-revoke");
+  if (revoke) {
+    const alias = t.getAttribute("data-alias");
+    const k = working().keys.find(k => (k.name || k.api_key_env) === revoke);
+    if (k) k.aliases = k.aliases.filter(a => a !== alias);
+    renderKeys(); announceStage(`staged: revoke alias ${alias} from ${revoke}`);
+    return;
+  }
+  const grant = t.getAttribute("data-grant");
+  if (grant) {
+    const avail = Object.keys(state.saved.aliases || {}).filter(a => {
+      const k = working().keys.find(k => (k.name || k.api_key_env) === grant);
+      return k && !k.aliases.includes(a);
+    });
+    if (!avail.length) { announce("no ungranted aliases left"); return; }
+    const a = prompt(`Grant which alias? (${avail.join(", ")})`);
+    if (!a || !avail.includes(a)) return;
+    working().keys.find(k => (k.name || k.api_key_env) === grant).aliases.push(a);
+    renderKeys(); announceStage(`staged: grant alias ${a} to ${grant}`);
+    return;
+  }
+
+  if (t.id === "discard") {
+    state.staged = null; renderAliases(); renderKeys(); renderDiff(); announce("staging discarded");
+    return;
+  }
+  if (t.id === "validate") {
+    const r = await api("/admin/config/validate", {method: "POST", body: JSON.stringify(state.staged)});
+    const b = await r.json();
+    if (b.valid) { $("stage-msg").textContent = "✓ valid — ready to Apply"; announce("validation passed"); }
+    else {
+      const bar = $("stage-bar"); bar.classList.add("err"); bar.setAttribute("role", "alertdialog");
+      $("stage-msg").textContent = "✖ " + b.errors.join("; ");
+      $("apply").disabled = true;
+      announce("validation failed");
+    }
+    return;
+  }
+  if (t.id === "apply") {
+    const r = await api("/admin/config", {method: "PUT", body: JSON.stringify(state.staged)});
+    const b = await r.json();
+    if (!r.ok) {
+      const bar = $("stage-bar"); bar.classList.add("err"); bar.setAttribute("role", "alertdialog");
+      $("stage-msg").textContent = "✖ server rejected: " + (b.detail && b.detail.errors ? b.detail.errors.join("; ") : JSON.stringify(b.detail));
+      $("apply").disabled = true;
+      announce("apply rejected — staging preserved");
+      return;
+    }
+    state.migrated = new Set(b.migrated_keys || []);
+    // re-fetch and re-render from the server (spec §3.2): never merge PUT into local state
+    await loadConfig();
+    showGeneratedModal(b.generated);
+    announce("applied — in-flight requests may still complete");
+    return;
+  }
+  if (t.id === "refresh-health") { await loadHealth(true); renderProviders(); renderDashboard(); return; }
+  for (const f of ["all", "compressed", "errors"]) {
+    if (t.id === `filter-${f}`) {
+      state.filter = f;
+      for (const g of ["all", "compressed", "errors"]) $(`filter-${g}`).setAttribute("aria-pressed", g === f);
+      renderDashboard();
+      return;
+    }
+  }
+  if (t.id === "pause") {
+    state.paused = !state.paused;
+    t.setAttribute("aria-pressed", state.paused);
+    t.textContent = state.paused ? "▶ resume" : "⏸ pause";
+    return;
+  }
+});
+
+// ---------- boot ----------
+(async () => {
+  try {
+    await loadConfig();
+    await loadHealth();
+    renderProviders(); renderDashboard();
+    setInterval(() => loadHealth(false).then(() => { renderProviders(); renderDashboard(); }), 30000);
+  } catch (e) {
+    if (String(e.message) !== "unauthorized") console.error(e);
+  }
+})();
+</script>
+</body>
+</html>

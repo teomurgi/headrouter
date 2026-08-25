@@ -401,6 +401,7 @@ class Settings:
     custom_providers: dict[str, ProviderDef] = field(default_factory=dict)
     key_bindings: dict[str, KeyBinding] = field(default_factory=dict)
     aliases: dict[str, Route] = field(default_factory=dict)
+    _providers_source: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -420,9 +421,13 @@ class Settings:
 
         custom: dict[str, ProviderDef] = {}
         key_bindings: dict[str, KeyBinding] = {}
+        aliases: dict[str, Route] = {}
         source = get("GATEWAY_PROVIDERS_FILE") or get("GATEWAY_PROVIDERS")
         if source and source.strip():
-            custom, key_bindings = load_gateway_config(source, env=env)
+            custom, key_bindings, aliases = load_config_v2(source, env=env)
+            providers_source = source.strip() if source.strip().endswith(".json") or "/" in source.strip() else ""
+        else:
+            providers_source = ""
 
         keys_raw = get("GATEWAY_API_KEYS")
         api_keys_set = frozenset(k.strip() for k in keys_raw.split(",") if k.strip())
@@ -450,7 +455,9 @@ class Settings:
             provider_base_urls=base_urls,
             provider_api_keys=api_keys,
             custom_providers=custom,
+            aliases=aliases,
             key_bindings=key_bindings,
+            _providers_source=providers_source,
         )
 
     def effective_api_keys(self) -> frozenset[str]:
