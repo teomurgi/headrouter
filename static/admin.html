@@ -365,6 +365,7 @@ function renderDiff() {
   $("stage-msg").textContent = `⚠ ${lines.length} staged change(s). Validation: every key needs ≥1 alias; alias names must be unique.`;
   bar.classList.remove("err");
   $("apply").disabled = false;
+  $("validate").disabled = false;
 }
 
 function announceStage(msg) { announce(msg); renderDiff(); }
