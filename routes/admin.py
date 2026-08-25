@@ -1,8 +1,9 @@
 """Admin surface (§5): config get/validate/apply, request log, provider health.
 
 All /admin/* endpoints inherit gateway auth (AuthMiddleware) — gateway keys
-only, no separate login. The API sends/accepts env-var names, never secret
-values (INV-5).
+only, no separate login — and additionally require an ADMIN key (INV-9):
+GATEWAY_API_KEYS members; scoped config keys get 403 regardless of grants.
+The API sends/accepts env-var names, never secret values (INV-5).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from config import ConfigError
@@ -21,6 +22,21 @@ from config import ConfigError
 router = APIRouter()
 
 HEALTH_CACHE_TTL_SECONDS = 30.0
+
+
+async def require_admin_key(request: Request) -> None:
+    """INV-9: the admin surface is for admin keys only, enforced in one place."""
+    settings = request.app.state.settings
+    token = getattr(request.state, "gateway_key", None)
+    if token is None or token not in settings.api_keys:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "admin key required",
+                    "hint": "this key is valid but lacks admin access; use a GATEWAY_API_KEYS value"},
+        )
+
+
+ADMIN = [Depends(require_admin_key)]
 
 
 def _store(request: Request):
@@ -41,12 +57,10 @@ def _reject_secrets(data: dict) -> list[str]:
     return errors
 
 
-@router.get("/admin")
+@router.get("/admin", include_in_schema=False)
 async def admin_page():
     build = _build_id()
     html = (Path(__file__).resolve().parent.parent / "static" / "admin.html").read_text(encoding="utf-8")
-    # stamp the build so "am I on the new JS?" is answerable at a glance;
-    # cache-bust hard so stale tabs can't serve old script after a deploy
     html = html.replace(">build ?</span>", f">{build}</span>")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
@@ -61,12 +75,12 @@ def _build_id() -> str:
         return "dev"
 
 
-@router.get("/admin/config")
+@router.get("/admin/config", dependencies=ADMIN)
 async def get_config(request: Request):
     return _store(request).sanitized_config()
 
 
-@router.post("/admin/config/validate")
+@router.post("/admin/config/validate", dependencies=ADMIN)
 async def validate_staged(request: Request):
     data = await request.json()
     from config import validate_config
@@ -75,7 +89,7 @@ async def validate_staged(request: Request):
     return {"valid": not errors, "errors": errors}
 
 
-@router.put("/admin/config")
+@router.put("/admin/config", dependencies=ADMIN)
 async def apply_config(request: Request):
     store = _store(request)
     data = await request.json()
@@ -90,13 +104,13 @@ async def apply_config(request: Request):
             "generated": store.pop_generated()}
 
 
-@router.get("/admin/log")
+@router.get("/admin/log", dependencies=ADMIN)
 async def get_log(request: Request, after: int = 0):
     log = request.app.state.request_log
     return {"entries": log.since(after), "last_seq": log.last_seq}
 
 
-@router.get("/admin/health/providers")
+@router.get("/admin/health/providers", dependencies=ADMIN)
 async def provider_health(request: Request):
     state = request.app.state
     settings = state.settings

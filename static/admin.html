@@ -223,11 +223,20 @@ async function api(path, opts) {
   if (key) headers["Authorization"] = "Bearer " + key;
   const r = await fetch(path, Object.assign({headers}, opts));
   if (r.status === 401) { onAuthFailure(key); throw new Error("unauthorized"); }
+  if (r.status === 403) { onForbidden(); throw new Error("forbidden"); }
   if (key && r.ok) { state.authFails = 0; $("key-gate").hidden = true; }
   return r;
 }
 
 // ---------- key gate (§5 auth state) ----------
+function onForbidden() {
+  // Valid key, lacks admin claim (INV-9): distinct from a wrong key —
+  // tell the operator *why* instead of spinning them in a retry loop.
+  $("key-gate").hidden = false;
+  $("gate-err").textContent = "this key is valid but lacks admin access — use a GATEWAY_API_KEYS value, not a scoped team key";
+  stopPolling();
+}
+
 function onAuthFailure(keyPresent) {
   if (!keyPresent) {
     // naked fetch: show the gate, keep the page (skeleton) visible

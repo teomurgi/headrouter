@@ -299,3 +299,50 @@ def test_admin_page_shows_build_and_no_store(tmp_path, captured):
     assert "build" in r.text and 'id="build-pill"' in r.text
     assert "build ?" not in r.text  # stamped, never left placeholder
     assert r.headers.get("cache-control") == "no-store"
+
+
+# --- INV-9: admin surface requires admin claim (scoped keys -> 403) ----------
+
+import pytest
+
+
+@pytest.fixture
+def scoped_client(tmp_path, captured):
+    # key-a-val is a scoped (key_bindings) key; test-key is the admin key
+    c, _ = make_client(tmp_path, captured)
+    return c
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/admin/config", None),
+    ("POST", "/admin/config/validate", {}),
+    ("PUT", "/admin/config", {}),
+    ("GET", "/admin/log", None),
+    ("GET", "/admin/health/providers", None),
+])
+def test_scoped_key_forbidden_on_admin(scoped_client, method, path, body):
+    r = scoped_client.request(method, path, headers={"Authorization": "Bearer key-a-val"}, json=body)
+    assert r.status_code == 403, f"{method} {path} returned {r.status_code}"
+    body = r.json()["detail"]
+    assert "admin" in str(body).lower()
+
+
+def test_escalation_chain_blocked(scoped_client, tmp_path, captured):
+    # Mary's exact exploit: scoped key PUTs a config granting itself admin
+    current = json.loads(scoped_client.get("/admin/config", headers=H).text)
+    staged = json.loads(json.dumps(current))
+    staged["keys"].append({"name": "escalator", "api_key": "hr_escalated", "aliases": ["fast"]})
+    for p in staged["providers"]:
+        p.pop("api_key_set", None)
+    r = scoped_client.put("/admin/config", headers={"Authorization": "Bearer key-a-val"}, json=staged)
+    assert r.status_code == 403
+    # config unchanged; escalated key does not authenticate
+    disk = json.loads((tmp_path / "providers.json").read_text())
+    assert "escalator" not in json.dumps(disk)
+    r = scoped_client.get("/admin/config", headers={"Authorization": "Bearer hr_escalated"})
+    assert r.status_code == 401
+
+
+def test_admin_key_still_allowed(scoped_client):
+    r = scoped_client.get("/admin/config", headers=H)  # test-key = GATEWAY_API_KEYS
+    assert r.status_code == 200
