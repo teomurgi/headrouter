@@ -545,7 +545,8 @@ function stageForm(hostId, fields, hint, onSubmit) {
   host.innerHTML = `<form class="stage-form" role="group" aria-label="${esc(fields[0].name)} form">
     ${fields.map(f => `<div class="field"><label for="sf-${esc(f.id)}">${esc(f.label)}</label>${f.options
       ? `<select id="sf-${esc(f.id)}" name="${esc(f.id)}">${f.options.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`
-      : `<input id="sf-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off"${f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : ""}>`}</div>`).join("")}
+      : `<input id="sf-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off"${f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : ""}${f.list ? ` list="sfl-${esc(f.id)}"` : ""}>`}</div>`).join("")}
+    ${fields.filter(f => f.list).map(f => `<datalist id="sfl-${esc(f.id)}">${f.list.map(o => `<option value="${esc(o)}">`).join("")}</datalist>`).join("")}
     ${(fields.extra || []).map(c => `<div class="field" style="flex:0"><label for="sf-${esc(c.id)}" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sf-${esc(c.id)}" name="${esc(c.id)}"> ${esc(c.label)}</label></div>`).join("")}
     <div class="field" style="flex:0"><button class="act primary" type="submit">Stage</button>
     <button class="act" type="button" data-cancel>Cancel</button></div>
@@ -602,8 +603,8 @@ document.addEventListener("click", async (e) => {
     const providers = (cfg.providers || []).map(p => p.name);
     stageForm("alias-form-host", [
       {id: "name", name: "alias", label: "Alias name"},
-      {id: "target", name: "target", label: "Target provider:model", options: providers.length ? providers.map(p => p + ":") : undefined},
-    ], "Model is free text after 'provider:' — providers: " + (providers.join(", ") || "none"), (v) => {
+      {id: "target", name: "target", label: "Target provider:model", placeholder: "openrouter:gpt-4o-mini", list: providers.map(p => p + ":")},
+    ], "Pick a provider prefix, then type the model after the colon — providers: " + (providers.join(", ") || "none"), (v) => {
       const name = (v.name || "").trim(), target = (v.target || "").trim();
       if (!name || !target.includes(":")) { const m = "alias needs a name and a 'provider:model' target"; announce(m); return m; }
       working().aliases = working().aliases || {};
