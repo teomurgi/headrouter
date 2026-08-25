@@ -430,7 +430,7 @@ function stageForm(hostId, fields, hint, onSubmit) {
   host.innerHTML = `<form class="stage-form" role="group" aria-label="${esc(fields[0].name)} form">
     ${fields.map(f => `<div class="field"><label for="sf-${esc(f.id)}">${esc(f.label)}</label>${f.options
       ? `<select id="sf-${esc(f.id)}" name="${esc(f.id)}">${f.options.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`
-      : `<input id="sf-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off">`}</div>`).join("")}
+      : `<input id="sf-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off"${f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : ""}>`}</div>`).join("")}
     <div class="field" style="flex:0"><button class="act primary" type="submit">Stage</button>
     <button class="act" type="button" data-cancel>Cancel</button></div>
     ${hint ? `<div class="hintline">${esc(hint)}</div>` : ""}
@@ -555,7 +555,7 @@ document.addEventListener("click", async (e) => {
     stageForm("provider-form-host", [
       {id: "name", name: "provider", label: "Name"},
       {id: "type", name: "type", label: "Type", options: presets},
-      {id: "base_url", name: "base_url", label: "Base URL", options: existing ? undefined : Object.values(defaults).filter(Boolean)},
+      {id: "base_url", name: "base_url", label: "Base URL", placeholder: "https://…"},
       {id: "api_key_env", name: "api_key_env", label: "API key env-var name"},
     ], "Only the variable name is stored; the value lives in the server's environment.", (v) => {
       const name = (v.name || "").trim(), base = (v.base_url || "").trim(), env = (v.api_key_env || "").trim();
@@ -578,7 +578,7 @@ document.addEventListener("click", async (e) => {
         renderProviders(); announceStage(`staged: add provider ${name}`);
       }
     });
-    // prefill for edit / preset defaults
+    // prefill for edit (new providers type a free-text base URL)
     const f = $("provider-form-host").querySelector("form");
     if (f) {
       if (p.name) { f.querySelector("#sf-name").value = p.name; }
