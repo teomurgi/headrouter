@@ -63,7 +63,7 @@ Point at it with `GATEWAY_PROVIDERS_FILE=providers.json` (or inline via `GATEWAY
 
 - **providers** — `name`, `type` (`openai`, `openrouter`, `ollama`, `openai-compat`, `anthropic`, `gemini`), `base_url`, and a credential: either `api_key` (a plain value, accepted **write-only** via the admin API — stored in this file, never returned by any GET) or `api_key_env` (the *name* of an environment variable holding the key). If a provider config file contains secrets, protect it: `chmod 600 providers.json`.
 - **aliases** — `name -> "provider:model"`. Each alias's provider must exist.
-- **keys** — `name` (display only), credential via `api_key_env` or `api_key`, and a non-empty `aliases` grant list; granted names must exist in `aliases`. Duplicate key values are rejected.
+- **keys** — `name` (display only), credential via `api_key_env` or `api_key`, and a non-empty `aliases` grant list; granted names must exist in `aliases`. Duplicate key values are rejected. Keys in this file are always **scoped** — admin access comes solely from `GATEWAY_API_KEYS` (env), never from a field in this file (`admin` is rejected).
 
 **Legacy configs migrate automatically**: the old shape (`keys[].provider` + per-key `routes`) is accepted at startup and converted in-memory to explicit per-key grants — per-key routes become global aliases granted to that key; routeless keys keep provider-scoped access, marked as *migrated* in the admin UI for review/pruning. Every Apply writes the v2 shape back to disk.
 
