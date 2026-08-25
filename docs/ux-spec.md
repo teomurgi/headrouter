@@ -54,6 +54,7 @@ Two sections, Aliases above Keys (the menu before the diners).
 ### 3.3 Providers page (`providers.html` in the sketch)
 
 - Card per provider: name, type dropdown, base URL, **API key env-var name** (the field's help text must say: "Only the variable name is stored; the value lives in the server's environment").
+- **+ Add provider** stages a new card (name, type dropdown — `KNOWN_PROVIDERS` presets plus `openai-compat` custom — free-text base URL, env-var name). **✎ edit in place** (rename auto-re-points aliases). **✕ remove** confirms blast radius ("N aliases affected") before staging. Provider staging rides the same shared stage→validate→apply bar as Keys & Aliases (§3.2 semantics apply verbatim: client diff, server errors inline, staging preserved on rejection, re-fetch after Apply). Renaming/removing a provider that aliases point to shows the blast radius before Apply; dangling-alias applies surface the server's validation error inline rather than being pre-blocked. *(Implemented in `ba45394`.)*
 - **Test connection** button → `/admin/health/providers` refresh for that provider; inline result.
 - Health line includes blast radius: "unreachable since 14:02 — N aliases affected: fast, smart".
 - Keys bound via aliases are listed (read-only; edit grants on the Keys page).
@@ -77,6 +78,8 @@ This is a spec'd string, not a nice-to-have: it's how a developer on team-b self
 **Diagnose a slow afternoon (Danilo):** Dashboard → filter "compressed" or "errors" → click a row (future: detail pane per sketch 003; v1 = row columns only) → see provider, latency, compression outcome.
 
 **Swap a model behind an alias:** Aliases → edit `fast → provider:model` → Validate shows the diff and affected keys count → Apply. No client changes ever.
+
+**Add/edit a provider (Olga):** Providers → "+ Add provider" (or ✎ on a card) → staged form (name, type, base URL, env-var name per §3.3) → Validate (diff includes provider changes + dangling-alias callouts) → Apply. Removing or renaming a provider that aliases point to shows blast radius before Apply. *(Implemented in `ba45394`.)*
 
 ## 5. States to design (all pages)
 
