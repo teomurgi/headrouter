@@ -51,11 +51,15 @@ class ConfigStore:
             return {}
 
     def sanitized_config(self) -> dict:
-        """The applied config as the admin API may return it (INV-5):
-        env-var names only, never secret values."""
+        """The applied config as the admin API may return it (INV-5, clause 1):
+        env-var names and a set/not-set hint only — never secret values."""
         data = json.loads(json.dumps(self._raw))  # deep copy
         for p in data.get("providers", []):
-            p.pop("api_key", None)
+            if "api_key" in p:
+                p.pop("api_key")
+                p["api_key_set"] = True
+            else:
+                p["api_key_set"] = bool(p.get("api_key_env"))
         for k in data.get("keys", []):
             k.pop("api_key", None)
         return data
@@ -83,10 +87,21 @@ class ConfigStore:
         errors = validate_config(data)
         if errors:
             raise ConfigError("; ".join(errors))
-        # INV-5: the admin surface never accepts secret values.
+        # INV-5 split: provider api_key VALUES are accepted write-only; gateway
+        # key values never are. Blank/absent on edit keeps the stored value.
+        for k in data.get("keys", []):
+            if isinstance(k, dict) and k.get("api_key"):
+                raise ConfigError("keys must reference 'api_key_env' or be generated; raw values are not accepted")
+        saved_providers = {p.get("name"): p for p in self._raw.get("providers", []) if isinstance(p, dict)}
         for p in data.get("providers", []):
+            if not isinstance(p, dict):
+                continue
+            p.pop("api_key_set", None)  # read-only hint from GET, not input
             if p.get("api_key"):
-                raise ConfigError("providers must reference 'api_key_env', not embed 'api_key' values")
+                continue
+            saved = saved_providers.get(p.get("name"))
+            if saved is not None and saved.get("api_key"):
+                p["api_key"] = saved["api_key"]  # blank-on-edit keeps existing
         # Keys with neither api_key nor api_key_env: reuse the stored value if
         # this is an existing key (GET strips values, so round-trips must not
         # regenerate them); otherwise generate one server-side (issue-key

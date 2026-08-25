@@ -13,7 +13,7 @@ V2 = {
         {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
     "aliases": {"fast": "or:gpt-4o-mini"},
-    "keys": [{"name": "team-a", "api_key": "key-a", "aliases": ["fast"]}],
+    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "aliases": ["fast"]}],
 }
 
 V2_B = {
@@ -22,8 +22,8 @@ V2_B = {
     ],
     "aliases": {"fast": "or:gpt-4o-mini", "smart": "or:gpt-4o"},
     "keys": [
-        {"name": "team-a", "api_key": "key-a", "aliases": ["fast"]},
-        {"name": "team-b", "api_key": "key-b", "aliases": ["smart"]},
+        {"name": "team-a", "api_key_env": "KEY_A", "aliases": ["fast"]},
+        {"name": "team-b", "api_key_env": "KEY_B", "aliases": ["smart"]},
     ],
 }
 
@@ -31,11 +31,11 @@ OLD = {
     "providers": [
         {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
-    "keys": [{"api_key": "legacy-key", "provider": "or"}],
+    "keys": [{"api_key_env": "LEGACY_KEY", "provider": "or"}],
 }
 
 
-ENV = {"OR_KEY": "sk-or"}
+ENV = {"OR_KEY": "sk-or", "KEY_A": "key-a", "KEY_B": "key-b", "LEGACY_KEY": "legacy-key"}
 
 
 def make_store(tmp_path, data=V2) -> ConfigStore:

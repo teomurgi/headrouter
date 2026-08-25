@@ -31,12 +31,6 @@ def _store(request: Request):
 
 def _reject_secrets(data: dict) -> list[str]:
     errors = []
-    for p in data.get("providers", []):
-        if isinstance(p, dict) and p.get("api_key"):
-            errors.append(
-                f"provider '{p.get('name', '?')}': secret 'api_key' values are not accepted; "
-                "use 'api_key_env'"
-            )
     for k in data.get("keys", []):
         if isinstance(k, dict) and k.get("api_key"):
             errors.append(

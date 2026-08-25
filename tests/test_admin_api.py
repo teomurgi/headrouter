@@ -57,9 +57,10 @@ def test_get_admin_config_env_names_only(tmp_path, captured):
 
 
 def test_put_admin_config_rejects_secret_values(tmp_path, captured):
+    # INV-5 clause 1: gateway KEY values are still rejected outright.
     c, _ = make_client(tmp_path, captured)
     bad = json.loads(json.dumps(V2))
-    bad["providers"][0]["api_key"] = "sk-secret"
+    bad["keys"][0]["api_key"] = "sk-raw"
     r = c.put("/admin/config", headers=H, json=bad)
     assert r.status_code == 400
     assert any("api_key" in e for e in r.json()["detail"]["errors"])
@@ -215,3 +216,56 @@ def test_admin_page_served_no_auth_needed(tmp_path, captured):
 def test_admin_page_survives_config_apply(tmp_path, captured):
     c, _ = make_client(tmp_path, captured)
     assert c.get("/admin").status_code == 200
+
+
+# --- A7: plain provider API keys, write-only (INV-5 two-clause split) --------
+
+
+def test_pasted_provider_key_stored_and_used(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    staged = json.loads(json.dumps(V2))
+    staged["providers"][0]["api_key_env"] = None
+    staged["providers"][0].pop("api_key_env")
+    staged["providers"][0]["api_key"] = "sk-pasted-secret"
+    r = c.put("/admin/config", headers=H, json=staged)
+    assert r.status_code == 200
+    # stored server-side...
+    disk = json.loads((tmp_path / "providers.json").read_text())
+    assert disk["providers"][0]["api_key"] == "sk-pasted-secret"
+    # ...used for upstream auth...
+    r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-a-val"},
+               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200
+    assert captured["requests"][0]["headers"]["authorization"] == "Bearer sk-pasted-secret"
+    # ...and never in any GET
+    body = c.get("/admin/config", headers=H).text
+    assert "sk-pasted-secret" not in body
+    got = json.loads(body)
+    assert got["providers"][0].get("api_key_set") is True
+
+
+def test_blank_on_edit_keeps_existing_key(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    staged = json.loads(json.dumps(V2))
+    staged["providers"][0].pop("api_key_env")
+    staged["providers"][0]["api_key"] = "sk-first"
+    assert c.put("/admin/config", headers=H, json=staged).status_code == 200
+    # round-trip from GET (value stripped, api_key_set true) with NO api_key field
+    got = json.loads(c.get("/admin/config", headers=H).text)
+    got["providers"][0].pop("api_key_set", None)
+    r = c.put("/admin/config", headers=H, json=got)
+    assert r.status_code == 200
+    disk = json.loads((tmp_path / "providers.json").read_text())
+    assert disk["providers"][0]["api_key"] == "sk-first"  # kept, not wiped
+    r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-a-val"},
+               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+    assert captured["requests"][0]["headers"]["authorization"] == "Bearer sk-first"
+
+
+def test_key_values_still_rejected(tmp_path, captured):
+    # INV-5 clause 1 unchanged for gateway keys
+    c, _ = make_client(tmp_path, captured)
+    bad = json.loads(json.dumps(V2))
+    bad["keys"][0]["api_key"] = "sk-raw"
+    r = c.put("/admin/config", headers=H, json=bad)
+    assert r.status_code == 400

@@ -22,7 +22,7 @@
   .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); color:var(--muted); }
   .pill.ok { color:var(--ok); border-color:var(--ok); }
   .pill.warn { color:var(--warn); border-color:var(--warn); }
-  main { padding:16px; max-width: 980px; }
+  main { padding:16px; max-width: 980px; margin-inline: auto; }
   [hidden] { display:none !important; }
   .bar { display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
   .bar h2 { font-size:15px; color:#fff; }
@@ -171,7 +171,7 @@
   <section id="page-providers" aria-label="Providers" hidden>
     <div class="bar">
       <h2>Providers</h2>
-      <span class="hint">where requests go — only the env-var name is stored; the value lives in the server's environment</span>
+      <span class="hint">where requests go — paste an API key (write-only, never shown back) or reference an env-var name</span>
       <span class="spacer"></span>
       <button class="act" id="add-provider">+ Add provider</button>
       <button class="act" id="refresh-health">Test connections</button>
@@ -345,7 +345,7 @@ function renderProviders() {
         <span class="state ${isNew(p) ? "staged" : "live"}">${isNew(p) ? "◐ staged" : "● " + esc(p.type)}</span>
         <button class="ghost" data-editprovider="${esc(p.name)}" aria-label="Edit provider ${esc(p.name)}">✎ edit</button>
         <button class="ghost" data-delprovider="${esc(p.name)}" aria-label="Remove provider ${esc(p.name)}">✕ remove</button></div>
-      <div class="meta">${esc(p.base_url)} · key env: <code>${esc(p.api_key_env || "—")}</code></div>
+      <div class="meta">${esc(p.base_url)} · credential: ${p.api_key_env ? `env <code>${esc(p.api_key_env)}</code>` : (p.api_key_set ? "API key set (hidden)" : "none")}</div>
       <div class="meta">${health}</div>
       <div class="meta">keys via aliases (read-only): ${keys.length ? keys.join(", ") : "none"} — edit grants on Keys &amp; Aliases</div>
     </div>`;
@@ -556,29 +556,33 @@ document.addEventListener("click", async (e) => {
       {id: "name", name: "provider", label: "Name"},
       {id: "type", name: "type", label: "Type", options: presets},
       {id: "base_url", name: "base_url", label: "Base URL", placeholder: "https://…"},
-      {id: "api_key_env", name: "api_key_env", label: "API key env-var name"},
-    ], "Only the variable name is stored; the value lives in the server's environment.", (v) => {
-      const name = (v.name || "").trim(), base = (v.base_url || "").trim(), env = (v.api_key_env || "").trim();
+      {id: "api_key", name: "api_key", label: existing && !p.api_key && p.api_key_set !== false ? "API key (blank = keep existing)" : "API key (paste once — stored server-side, never displayed)", placeholder: "sk-…"},
+      {id: "api_key_env", name: "api_key_env", label: "…or API key env-var name", placeholder: "OPENAI_API_KEY"},
+    ], "Paste a key (write-only, blank on edit keeps the current one) or give an env-var name; the value lives server-side either way.", (v) => {
+      const name = (v.name || "").trim(), base = (v.base_url || "").trim(), env = (v.api_key_env || "").trim(), key = (v.api_key || "").trim();
       if (!name || !base) { announce("provider needs a name and base URL"); return; }
       const providers = working().providers = working().providers || [];
+      const fields = {type: v.type, base_url: base};
+      if (key) fields.api_key = key;          // write-only: sent on PUT, never in GET
+      if (env) fields.api_key_env = env;       // absent on edit = keep existing server-side
       if (origName) {
         // rename re-points aliases and keys follow by name indirection
         if (origName !== name) {
           working().aliases = Object.fromEntries(Object.entries(working().aliases || {})
             .map(([a, tgt]) => [a, tgt.startsWith(origName + ":") ? name + ":" + tgt.slice(origName.length + 1) : tgt]));
           const idx = providers.findIndex(x => x.name === origName);
-          providers[idx] = {name, type: v.type, base_url: base, api_key_env: env};
+          providers[idx] = {name, ...fields};
         } else {
-          Object.assign(providers.find(x => x.name === name), {type: v.type, base_url: base, api_key_env: env});
+          Object.assign(providers.find(x => x.name === name), fields);
         }
         renderProviders(); announceStage(`staged: edit provider ${name}`);
       } else {
         if (providers.some(x => x.name === name)) { announce(`provider '${name}' already exists`); return; }
-        providers.push({name, type: v.type, base_url: base, api_key_env: env});
+        providers.push({name, ...fields});
         renderProviders(); announceStage(`staged: add provider ${name}`);
       }
     });
-    // prefill for edit (new providers type a free-text base URL)
+    // prefill for edit (api_key never prefilled — write-only)
     const f = $("provider-form-host").querySelector("form");
     if (f) {
       if (p.name) { f.querySelector("#sf-name").value = p.name; }
