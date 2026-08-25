@@ -79,6 +79,7 @@
   .diff { margin:14px 0; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:12px; white-space:pre-wrap; }
   .diff .add { color:var(--ok); } .diff .del { color:var(--err); }
   .banner { position:sticky; bottom:14px; display:flex; align-items:center; gap:12px; background:var(--panel); border:1px solid var(--warn); border-radius:8px; padding:10px 14px; margin-top:14px; flex-wrap:wrap; }
+  .ok-banner { border-color:var(--ok); color:var(--ok); margin:0 0 14px 0; position:static; }
   .banner .msg { flex:1; color:var(--warn); min-width:200px; }
   .banner.err { border-color:var(--err); }
   .banner.err .msg { color:var(--err); }
@@ -320,6 +321,7 @@ async function loadConfig() {
   const logr = await api("/admin/log");
   if (logr.ok) { const b = await logr.json(); state.log = b.entries; state.lastSeq = b.last_seq; }
   renderKeys(); renderAliases(); renderProviders(); renderDashboard();
+  renderDiff(); // staging is void after a re-fetch: hide the bar, disable apply/validate
 }
 
 // ---------- staging / diff ----------
@@ -330,7 +332,11 @@ function stagedCount() {
 }
 function renderDiff() {
   const box = $("diff"), bar = $("stage-bar");
-  if (!dirty()) { box.hidden = true; bar.hidden = true; return; }
+  if (!dirty()) {
+    box.hidden = true; bar.hidden = true;
+    $("apply").disabled = true; $("validate").disabled = true;  // nothing staged: no null-payload PUTs
+    return;
+  }
   const lines = [];
   const sa = state.saved.aliases || {}, ta = (state.staged.aliases || {});
   for (const k of new Set([...Object.keys(sa), ...Object.keys(ta)])) {
@@ -650,6 +656,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (t.id === "validate") {
+    if (!state.staged) { bannerError("nothing staged to validate"); return; }
     const r = await api("/admin/config/validate", {method: "POST", body: JSON.stringify(state.staged)});
     const b = await readJson(r);
     if (b._parse_error) { bannerError(`validation endpoint returned HTTP ${b._status} — server error, staging preserved`); announce("validate failed: HTTP " + b._status); return; }
@@ -658,6 +665,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (t.id === "apply") {
+    if (!state.staged) { bannerError("nothing staged to apply — stage a change first"); return; }
     const r = await api("/admin/config", {method: "PUT", body: JSON.stringify(state.staged)});
     const b = await readJson(r);
     if (b._parse_error) { bannerError(`apply returned HTTP ${b._status} — server error, staging preserved`); announce("apply failed: HTTP " + b._status); return; }
@@ -670,6 +678,15 @@ document.addEventListener("click", async (e) => {
     // re-fetch and re-render from the server (spec §3.2): never merge PUT into local state
     await loadConfig();
     showGeneratedModal(b.generated);
+    // visible success feedback: the staging bar hides on re-render, so show a
+    // transient confirmation the user can actually see (not announce-only)
+    const ok = document.createElement("div");
+    ok.className = "banner ok-banner";
+    ok.setAttribute("role", "status");
+    ok.textContent = `✓ applied ${state.migrated.size ? "(incl. migrated keys) " : ""}— config is live`;
+    const m = document.querySelector("main");
+    m.prepend(ok);
+    setTimeout(() => ok.remove(), 6000);
     announce("applied — in-flight requests may still complete");
     return;
   }
