@@ -692,7 +692,11 @@ document.addEventListener("click", async (e) => {
           const idx = providers.findIndex(x => x.name === origName);
           providers[idx] = {name, ...fields};
         } else {
-          Object.assign(providers.find(x => x.name === name), fields);
+          const tgt = providers.find(x => x.name === name);
+          Object.assign(tgt, fields);
+          // clearing the env-var field must actually clear it (absent ≠ keep for env);
+          // a stored api_key is preserved server-side via api_key_set, never here
+          if (!env) delete tgt.api_key_env;
         }
         renderProviders(); announceStage(`staged: edit provider ${name}`);
       } else {
