@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Headrouter — Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #21262d; --fg: #c9d1d9;
+    --muted: #8b949e; --accent: #58a6ff; --ok: #3fb950; --warn: #d29922; --err: #f85149; --purple: #a371f7;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { font: 13px/1.45 var(--mono); background: var(--bg); color: var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:14px; color:#fff; letter-spacing:.5px; }
+  nav.top { display:flex; gap:4px; margin-left:16px; }
+  nav.top a { color: var(--muted); text-decoration:none; padding:4px 12px; border-radius:6px; }
+  nav.top a:hover { color:#fff; background:var(--panel); }
+  nav.top a[aria-current="page"] { color:#fff; background:var(--panel); border:1px solid var(--line); }
+  .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .spacer { flex:1; }
+  main { display:grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 41px); }
+  aside { border-right:1px solid var(--line); padding:10px; }
+  aside h2 { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin:12px 0 6px; }
+  aside .row { display:flex; justify-content:space-between; padding:2px 4px; border-radius:4px; }
+  aside .row:hover { background: var(--panel); }
+  aside .to { color: var(--muted); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .dot.ok{background:var(--ok)} .dot.err{background:var(--err)}
+  section { padding:12px 14px; }
+  .kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:12px; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .kpi .label { font-size:11px; color:var(--muted); }
+  .kpi .value { font-size:22px; color:#fff; margin-top:2px; }
+  .kpi .sub { font-size:11px; color:var(--muted); }
+  .chart { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:12px; }
+  .chart .label { font-size:11px; color:var(--muted); margin-bottom:6px; }
+  .bars { display:flex; align-items:flex-end; gap:3px; height:70px; }
+  .bars i { flex:1; background:var(--accent); border-radius:2px 2px 0 0; min-height:2px; }
+  .bars i.compressed { background:var(--purple); }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  th, td { text-align:left; padding:5px 10px; border-bottom:1px solid var(--line); font-size:12px; }
+  th { color:var(--muted); font-weight:600; background:#1c2129; }
+  td.s2{color:var(--ok)} td.s4{color:var(--warn)} td.s5{color:var(--err)}
+  .comp-yes{color:var(--purple)} .comp-no{color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>HEADROUTER</h1>
+  <nav.top aria-label="Pages">
+    <a href="index.html" aria-current="page">Dashboard</a>
+    <a href="routes.html">Routes</a>
+    <a href="providers.html">Providers</a>
+  </nav.top>
+  <span class="spacer"></span>
+  <span class="pill ok">● healthy</span>
+  <span class="pill">compression engine: loaded</span>
+</header>
+<main>
+  <aside aria-label="Keys and providers">
+    <h2>Keys</h2>
+    <div class="row"><span>key-team-a</span><span class="to">my-openai</span></div>
+    <div class="row"><span>team-b-key</span><span class="to">work-claude</span></div>
+    <h2>Providers</h2>
+    <div class="row"><span><span class="dot ok"></span>my-openai</span></div>
+    <div class="row"><span><span class="dot ok"></span>work-claude</span></div>
+    <div class="row"><span><span class="dot err"></span>openrouter</span></div>
+    <div class="row"><span><span class="dot ok"></span>local (ollama)</span></div>
+    <h2>Keys</h2>
+    <div class="row"><span>key-team-a</span><span class="to">my-openai</span></div>
+    <div class="row"><span>team-b-key</span><span class="to">work-claude</span></div>
+  </aside>
+  <section>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Requests (24h)</div><div class="value">18,204</div><div class="sub">12.6/min avg</div></div>
+      <div class="kpi"><div class="label">Latency p50 / p95</div><div class="value">840ms</div><div class="sub">p95 3.2s</div></div>
+      <div class="kpi"><div class="label">Tokens in / out</div><div class="value">41.2M / 9.8M</div><div class="sub">today</div></div>
+      <div class="kpi"><div class="label">Compression saved</div><div class="value">1.24M</div><div class="sub">214 applied · 38% avg cut</div></div>
+    </div>
+    <div class="chart">
+      <div class="label">Requests last 30 min — <span style="color:var(--accent)">■ passthrough</span> <span style="color:var(--purple)">■ compressed</span></div>
+      <div class="bars" role="img" aria-label="Bar chart of requests per minute; a minority are compressed">
+        <i style="height:30%"></i><i style="height:45%"></i><i class="compressed" style="height:12%"></i><i style="height:60%"></i><i style="height:52%"></i><i class="compressed" style="height:20%"></i><i style="height:38%"></i><i style="height:70%"></i><i class="compressed" style="height:14%"></i><i style="height:55%"></i><i style="height:48%"></i><i class="compressed" style="height:18%"></i><i style="height:62%"></i><i style="height:75%"></i><i class="compressed" style="height:10%"></i><i style="height:40%"></i><i style="height:58%"></i><i class="compressed" style="height:22%"></i><i style="height:66%"></i><i style="height:50%"></i><i class="compressed" style="height:16%"></i><i style="height:44%"></i><i style="height:72%"></i><i style="height:60%"></i><i class="compressed" style="height:19%"></i><i style="height:35%"></i><i style="height:56%"></i><i style="height:64%"></i><i class="compressed" style="height:13%"></i><i style="height:47%"></i>
+      </div>
+    </div>
+    <table aria-label="Recent requests">
+      <thead><tr><th>Time</th><th>Model</th><th>Provider</th><th>Status</th><th>Latency</th><th>Tok in</th><th>Tok out</th><th>Compressed</th></tr></thead>
+      <tbody>
+        <tr><td>14:32:08</td><td>sonnet</td><td>work-claude</td><td class="s2">200</td><td>1.2s</td><td>84,120</td><td>1,930</td><td class="comp-yes">▼ yes (31k saved)</td></tr>
+        <tr><td>14:31:54</td><td>gpt4o</td><td>my-openai</td><td class="s2">200</td><td>640ms</td><td>3,210</td><td>812</td><td class="comp-no">no</td></tr>
+        <tr><td>14:31:41</td><td>local</td><td>ollama</td><td class="s5">502</td><td>—</td><td>12,004</td><td>—</td><td class="comp-no">no</td></tr>
+        <tr><td>14:31:22</td><td>fast</td><td>openrouter</td><td class="s4">429</td><td>310ms</td><td>1,100</td><td>—</td><td class="comp-no">no</td></tr>
+        <tr><td>14:31:05</td><td>sonnet</td><td>work-claude</td><td class="s2">200</td><td>2.8s</td><td>142,650</td><td>3,410</td><td class="comp-yes">▼ yes (58k saved)</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

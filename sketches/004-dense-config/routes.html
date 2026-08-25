@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Headrouter — Keys &amp; Aliases</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0d1117; --panel:#161b22; --line:#21262d; --fg:#c9d1d9; --muted:#8b949e;
+    --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149; --purple:#a371f7;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { font:13px/1.45 var(--mono); background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:14px; color:#fff; letter-spacing:.5px; }
+  nav.top { display:flex; gap:4px; margin-left:16px; }
+  nav.top a { color:var(--muted); text-decoration:none; padding:4px 12px; border-radius:6px; }
+  nav.top a:hover { color:#fff; background:var(--panel); }
+  nav.top a[aria-current="page"] { color:#fff; background:var(--panel); border:1px solid var(--line); }
+  .spacer{flex:1}
+  .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  main { padding:16px; max-width: 920px; }
+  .bar { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+  .bar h2 { font-size:15px; color:#fff; }
+  .bar .hint { color:var(--muted); font-size:12px; }
+  button { font:inherit; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 14px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:#fff; }
+  button.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+  .explain { color:var(--muted); font-size:12px; margin-bottom:16px; }
+  h3.sec { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin:18px 0 10px; }
+
+  /* Alias chips */
+  .aliases { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .alias { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; display:flex; align-items:center; gap:8px; }
+  .alias .name { color:#fff; }
+  .alias .def { color:var(--muted); font-size:12px; }
+  .alias .n { font-size:11px; color:var(--accent); }
+  .alias:hover { border-color:var(--accent); }
+
+  /* Key cards */
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .card.staged { border-color:var(--warn); }
+  .card .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .keyname { font-size:14px; color:#fff; background:var(--bg); border:1px dashed var(--line); border-radius:6px; padding:3px 10px; }
+  .state { font-size:11px; padding:1px 8px; border-radius:10px; border:1px solid var(--line); color:var(--muted); margin-left:auto; }
+  .state.live { color:var(--ok); border-color:var(--ok); }
+  .state.staged { color:var(--warn); border-color:var(--warn); }
+  .ghost { color:var(--muted); background:none; border:none; padding:2px 6px; cursor:pointer; }
+  .ghost:hover { color:var(--err); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--purple); color:var(--purple); border-radius:999px; padding:2px 6px 2px 10px; font-size:12px; }
+  .chip button { background:none; border:none; color:inherit; padding:0 4px; cursor:pointer; font-size:12px; }
+  .chip.off { border-color:var(--line); color:var(--muted); border-style:dashed; }
+  .meta { margin-top:8px; font-size:12px; color:var(--muted); }
+  .meta .usage { color:var(--fg); }
+  .note { font-size:12px; color:var(--warn); margin-top:6px; }
+
+  .diff { margin:14px 0; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:12px; }
+  .diff .d { color:var(--muted); margin-bottom:6px; }
+  .diff .add { color:var(--ok); } .diff .del { color:var(--err); }
+  .banner { position:sticky; bottom:14px; display:flex; align-items:center; gap:12px; background:var(--panel); border:1px solid var(--warn); border-radius:8px; padding:10px 14px; margin-top:14px; }
+  .banner .msg { flex:1; color:var(--warn); }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEADROUTER</h1>
+  <nav.top aria-label="Pages">
+    <a href="index.html">Dashboard</a>
+    <a href="routes.html" aria-current="page">Keys &amp; Aliases</a>
+    <a href="providers.html">Providers</a>
+  </nav.top>
+  <span class="spacer"></span>
+  <span class="pill ok">● healthy</span>
+</header>
+<main>
+  <div class="bar">
+    <h2>Aliases</h2>
+    <span class="hint">named model routes, defined once — clients ask for these names</span>
+    <span class="spacer"></span>
+    <button id="addAlias">+ Add alias</button>
+  </div>
+  <p class="explain">An alias hides the real provider model behind a stable name — swap the backing model and no client changes. Clients only ever see alias names.</p>
+  <div class="aliases" role="list" aria-label="Global aliases">
+    <div class="alias" role="listitem"><span class="name">fast</span><span class="def">openrouter:gpt-4o-mini</span><span class="n">2 keys</span></div>
+    <div class="alias" role="listitem"><span class="name">smart</span><span class="def">my-openai:gpt-4o</span><span class="n">3 keys</span></div>
+    <div class="alias" role="listitem"><span class="name">sonnet</span><span class="def">work-claude:claude-sonnet-4</span><span class="n">1 key</span></div>
+    <div class="alias" role="listitem"><span class="name">local</span><span class="def">ollama:llama3.1:70b</span><span class="n">3 keys</span></div>
+  </div>
+
+  <div class="bar">
+    <h2>Keys</h2>
+    <span class="hint">each downstream key is entitled to a set of aliases</span>
+    <span class="spacer"></span>
+    <button id="addKey">+ Issue key</button>
+  </div>
+  <p class="explain">A request with this key succeeds only if its <code>model</code> names one of the key's aliases. Asking for anything else returns a clear 404-style error listing the available aliases.</p>
+
+  <div class="card">
+    <div class="head">
+      <span class="keyname">key-team-a</span>
+      <span class="state live">● live</span>
+      <button class="ghost" aria-label="Revoke key-team-a">✕ revoke</button>
+    </div>
+    <div class="chips" role="group" aria-label="Aliases granted to key-team-a">
+      <span class="chip">fast <button aria-label="Revoke alias fast for this key">✕</button></span>
+      <span class="chip">smart <button aria-label="Revoke alias smart for this key">✕</button></span>
+      <span class="chip">local <button aria-label="Revoke alias local for this key">✕</button></span>
+      <span class="chip off">+ grant alias</span>
+    </div>
+    <div class="meta">usage: <span class="usage">9,412 req / 24h</span> · last seen 14:32 · created by olga, 3 weeks ago</div>
+  </div>
+
+  <div class="card">
+    <div class="head">
+      <span class="keyname">team-b-key</span>
+      <span class="state live">● live</span>
+      <button class="ghost" aria-label="Revoke team-b-key">✕ revoke</button>
+    </div>
+    <div class="chips" role="group" aria-label="Aliases granted to team-b-key">
+      <span class="chip">sonnet <button aria-label="Revoke alias sonnet for this key">✕</button></span>
+      <span class="chip">local <button aria-label="Revoke alias local for this key">✕</button></span>
+      <span class="chip off">+ grant alias</span>
+    </div>
+    <div class="meta">usage: <span class="usage">4,890 req / 24h</span> · last seen 14:31 · models: fast &amp; smart <strong>not</strong> visible to this key</div>
+  </div>
+
+  <div class="card staged">
+    <div class="head">
+      <span class="keyname" style="border-color:var(--warn)">new-key-…</span>
+      <span class="state staged">◐ staged</span>
+      <button class="ghost" aria-label="Remove staged key">✕ remove</button>
+    </div>
+    <div class="chips" role="group" aria-label="Aliases granted to new key">
+      <span class="chip">fast <button aria-label="Revoke alias fast for this key">✕</button></span>
+      <span class="chip off">+ grant alias</span>
+    </div>
+    <div class="note">The key value is generated on Apply and shown once — never displayed again.</div>
+  </div>
+
+  <div class="diff" role="region" aria-label="Pending changes">
+    <div class="d">Pending changes — applied on “Apply” after validation:</div>
+    <div class="add">+ issue new key, granted: fast</div>
+  </div>
+
+  <div class="banner" role="alertdialog" aria-label="Unapplied changes">
+    <span class="msg">⚠ 1 staged change. Validation: every key needs ≥1 alias; alias names must be unique.</span>
+    <button id="validate">Validate</button>
+    <button id="discard">Discard</button>
+    <button class="primary" id="apply">Apply (1)</button>
+  </div>
+  <p class="sr" aria-live="polite" id="live"></p>
+</main>
+<script>
+  const live = m => document.getElementById('live').textContent = m;
+  document.getElementById('addAlias').onclick = () => live('New alias row staged: pick a name and provider:model.');
+  document.getElementById('addKey').onclick = () => live('New key staged: grant at least one alias, then Apply to generate it.');
+  document.getElementById('validate').onclick = () => live('Validation passed: all keys have at least one alias; alias names unique.');
+  document.getElementById('apply').onclick = () => live('Applied and hot-reloaded.');
+  document.getElementById('discard').onclick = () => live('Staged changes discarded.');
+</script>
+</body>
+</html>

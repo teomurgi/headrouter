@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Headrouter — Providers</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0d1117; --panel:#161b22; --line:#21262d; --fg:#c9d1d9; --muted:#8b949e;
+    --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149; --purple:#a371f7;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { font:13px/1.45 var(--mono); background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:14px; color:#fff; letter-spacing:.5px; }
+  nav.top { display:flex; gap:4px; margin-left:16px; }
+  nav.top a { color:var(--muted); text-decoration:none; padding:4px 12px; border-radius:6px; }
+  nav.top a:hover { color:#fff; background:var(--panel); }
+  nav.top a[aria-current="page"] { color:#fff; background:var(--panel); border:1px solid var(--line); }
+  .spacer{flex:1}
+  .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  main { padding:16px; max-width: 980px; }
+  .bar { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .bar h2 { font-size:15px; color:#fff; }
+  .bar .hint { color:var(--muted); font-size:12px; }
+  button { font:inherit; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 14px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:#fff; }
+  button.primary { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .card.staged { border-color:var(--warn); }
+  .card .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .card .head .name { font-size:15px; color:#fff; }
+  .card .head .type { padding:1px 8px; border-radius:10px; border:1px solid var(--line); font-size:11px; color:var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; }
+  .dot.ok{background:var(--ok)} .dot.err{background:var(--err)} .dot.warn{background:var(--warn)}
+  .fields { display:grid; grid-template-columns: 180px 1fr 1fr; gap:8px 10px; align-items:end; }
+  .f label { display:block; font-size:11px; color:var(--muted); margin-bottom:3px; text-transform:uppercase; letter-spacing:.5px; }
+  .f input, .f select { font:inherit; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; width:100%; }
+  .f input:focus, .f select:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  .card .foot { display:flex; align-items:center; gap:10px; margin-top:10px; }
+  .card .foot .spacer{flex:1}
+  .card .health { font-size:12px; color:var(--muted); }
+  .keys { margin-top:8px; border-top:1px dashed var(--line); padding-top:8px; font-size:12px; color:var(--muted); }
+  .banner { position:sticky; bottom:14px; display:flex; align-items:center; gap:12px; background:var(--panel); border:1px solid var(--warn); border-radius:8px; padding:10px 14px; margin-top:14px; }
+  .banner .msg { flex:1; color:var(--warn); }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1>HEADROUTER</h1>
+  <nav.top aria-label="Pages">
+    <a href="index.html">Dashboard</a>
+    <a href="routes.html">Routes</a>
+    <a href="providers.html" aria-current="page">Providers</a>
+  </nav.top>
+  <span class="spacer"></span>
+  <span class="pill ok">● healthy</span>
+</header>
+<main>
+  <div class="bar">
+    <h2>Providers</h2>
+    <span class="hint">adapter type · base URL · credentials via env var, never stored in the browser</span>
+    <span class="spacer"></span>
+    <button id="add">+ Add provider</button>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="dot ok"></span><span class="name">my-openai</span><span class="type">openai</span></div>
+    <div class="fields">
+      <div class="f"><label for="p1t">Type</label><select id="p1t"><option>openai</option><option>anthropic</option><option>gemini</option><option>ollama</option><option>openrouter</option><option>openai-compat</option></select></div>
+      <div class="f"><label for="p1u">Base URL</label><input id="p1u" value="https://api.openai.com/v1"></div>
+      <div class="f"><label for="p1k">API key env var</label><input id="p1k" value="OPENAI_API_KEY" placeholder="e.g. WORK_OPENAI_KEY"></div>
+    </div>
+    <div class="foot">
+      <span class="health">reachable · p50 640ms · last checked 30s ago</span>
+      <span class="spacer"></span>
+      <button>Test connection</button>
+      <button class="ghost" style="border:none;background:none;color:var(--muted)">Remove</button>
+    </div>
+    <div class="keys">Keys bound: <span style="color:var(--fg)">key-team-a</span></div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="dot err"></span><span class="name">openrouter</span><span class="type">openrouter</span></div>
+    <div class="fields">
+      <div class="f"><label for="p2t">Type</label><select id="p2t"><option selected>openrouter</option><option>openai</option><option>anthropic</option><option>gemini</option><option>ollama</option><option>openai-compat</option></select></div>
+      <div class="f"><label for="p2u">Base URL</label><input id="p2u" value="https://openrouter.ai/api/v1"></div>
+      <div class="f"><label for="p2k">API key env var</label><input id="p2k" value="OPENROUTER_API_KEY"></div>
+    </div>
+    <div class="foot">
+      <span class="health" style="color:var(--err)">unreachable since 14:02 (3× 429 in the log) — 2 routes affected: fast</span>
+      <span class="spacer"></span>
+      <button>Test connection</button>
+      <button style="border:none;background:none;color:var(--muted)">Remove</button>
+    </div>
+  </div>
+
+  <div class="card staged">
+    <div class="head"><span class="dot warn"></span><span class="name">new-provider</span><span class="type">anthropic</span></div>
+    <div class="fields">
+      <div class="f"><label for="p3t">Type</label><select id="p3t"><option selected>anthropic</option><option>openai</option><option>gemini</option><option>ollama</option><option>openrouter</option><option>openai-compat</option></select></div>
+      <div class="f"><label for="p3u">Base URL</label><input id="p3u" value="https://api.anthropic.com"></div>
+      <div class="f"><label for="p3k">API key env var</label><input id="p3k" value="" placeholder="e.g. WORK_ANTHROPIC_KEY"></div>
+    </div>
+    <div class="foot">
+      <span class="health" style="color:var(--warn)">◐ staged — not yet applied</span>
+      <span class="spacer"></span>
+      <button>Test connection</button>
+      <button style="border:none;background:none;color:var(--muted)">Remove</button>
+    </div>
+    <div class="keys">Keys bound: none yet</div>
+  </div>
+
+  <div class="banner" role="alertdialog" aria-label="Unapplied changes">
+    <span class="msg">⚠ 1 staged provider (new-provider). Credentials live in env vars — this page only records the variable <em>name</em>.</span>
+    <button>Discard</button>
+    <button class="primary">Apply (1)</button>
+  </div>
+  <p class="sr" aria-live="polite">Providers page loaded. 1 provider unreachable, 1 staged change pending.</p>
+</main>
+<script>
+  document.getElementById('add').onclick = () => {
+    const cards = document.querySelectorAll('.card');
+    const c = cards[0].cloneNode(true);
+    c.classList.add('staged');
+    c.querySelector('.name').textContent = 'new-provider';
+    c.querySelector('.dot').className = 'dot warn';
+    c.querySelector('.health').textContent = '◐ staged — not yet applied';
+    c.querySelector('.health').style.color = 'var(--warn)';
+    document.querySelector('.banner').before(c);
+  };
+</script>
+</body>
+</html>
