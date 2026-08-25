@@ -27,6 +27,7 @@ Key       ::= { api_key | api_key_env, aliases: [alias names] }
 - **INV-5 (No secrets to the browser)** — two clauses. (1) **Reads:** no admin API response ever contains a secret value — `sanitized_config()` is the enforcement point; provider credentials surface as `api_key_set: true` (or the env-var name), gateway keys as generated-once values. Absolute, unchanged. (2) **Writes:** `PUT /admin/config` accepts a pasted `api_key` value **for providers only, write-only** (stored server-side in providers.json, never echoed back; blank-on-edit keeps the existing value). Gateway *keys* still reject raw values outright. The env-var path remains supported for providers.
 - **INV-6 (Log is metadata-only).** The request ring buffer stores no request/response bodies — headers-extracted metadata only (see §5).
 - **INV-7 (No database).** All state is config file + in-memory. Ring buffers are bounded (`deque(maxlen=N)`).
+- **INV-9 (Admin surface requires admin claim).** All `/admin/*` API endpoints demand a key with the `admin` claim, enforced by one router-level `Depends(require_admin_key)` — a valid-but-scoped key gets **403** with a distinct body (`"admin key required"`), vs. 401 = no/invalid key from the auth middleware. New admin endpoints inherit the guard automatically; the escalation chain (scoped key PUTs a self-promoting config) is regression-locked. (`945b76d`)
 
 ## 3. Resolution algorithm (normative)
 
