@@ -77,7 +77,7 @@ Open `http://localhost:8000/admin`. The page itself is public (static HTML); eve
 
 - **Dashboard** — KPI row (requests, latency p50/p95, tokens in/out, compression savings), live request stream (cursor-polled, filter by compressed/errors, pausable), keys/providers rail.
 - **Keys & Aliases** — chip-card editing with a sticky stage → validate → apply bar. Staged changes show a client-computed diff; Validate surfaces server errors verbatim; Apply is re-validated server-side and, on rejection, your staging is preserved.
-- **Providers** — cards with type, base URL, key env-var name, reachability with blast radius ("unreachable — 2 aliases affected"), and bound keys.
+- **Providers** — editable cards: "+ Add provider" (type dropdown with known-provider presets, base URL, key env-var name — only the variable name is stored, the value lives in the server's environment), ✎ edit in place (renaming re-points aliases automatically), ✕ remove (confirms blast radius). Reachability with blast radius ("unreachable — 2 aliases affected") and bound keys shown read-only. Provider changes stage through the same validate → apply bar.
 
 REST surface (consumed by the page, usable directly):
 
