@@ -346,3 +346,22 @@ def test_escalation_chain_blocked(scoped_client, tmp_path, captured):
 def test_admin_key_still_allowed(scoped_client):
     r = scoped_client.get("/admin/config", headers=H)  # test-key = GATEWAY_API_KEYS
     assert r.status_code == 200
+
+
+# --- apply failure diagnosability: OSError -> specific 500 body ----------------
+
+
+def test_apply_unwritable_config_file_specific_error(tmp_path, captured, monkeypatch):
+    import os
+    c, store = make_client(tmp_path, captured)
+    staged = json.loads(json.dumps(V2))
+    staged["aliases"]["smart"] = "or:gpt-4o"
+    # make the persist target a directory -> os.replace fails with OSError
+    os.unlink(tmp_path / "providers.json")
+    (tmp_path / "providers.json").mkdir()
+    r = c.put("/admin/config", headers=H, json=staged)
+    assert r.status_code == 500
+    body = r.json()
+    msg = str(body.get("detail") or body)
+    assert "providers.json" in msg, msg
+    assert any(k in msg for k in ("Permission", "denied", "Is a directory", "Not a directory", "Errno")), msg

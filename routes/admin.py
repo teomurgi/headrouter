@@ -100,6 +100,16 @@ async def apply_config(request: Request):
         await store.apply_async(data)
     except ConfigError as exc:
         return JSONResponse({"detail": {"errors": [str(exc)]}}, status_code=400)
+    except OSError as exc:
+        # persistence failed after validation: name the file and reason so
+        # this is diagnosable from the browser (running settings untouched)
+        return JSONResponse(
+            {"detail": {"errors": [
+                f"cannot write config file {store.path}: {exc.strerror or exc} — "
+                "applied nowhere; check permissions/owner of the file and its directory"
+            ]}},
+            status_code=500,
+        )
     return {"applied": True, "migrated_keys": sorted(store.migrated_keys),
             "generated": store.pop_generated()}
 
