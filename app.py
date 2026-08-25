@@ -17,6 +17,7 @@ from compression_service import CompressionService
 from config import Settings
 from config_store import ConfigStore
 from middleware import AuthMiddleware, Metrics
+from request_log import RequestLog
 from routes import api_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -60,6 +61,7 @@ def create_app(
         strategy=settings.compression_strategy,
     )
     app.state.metrics = Metrics()
+    app.state.request_log = RequestLog()
 
     if settings.effective_api_keys():
         app.add_middleware(AuthMiddleware, api_keys=None, app_ref=app)

@@ -10,7 +10,7 @@ from config_store import ConfigStore
 
 V2 = {
     "providers": [
-        {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key": "sk-or"},
+        {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
     "aliases": {"fast": "or:gpt-4o-mini"},
     "keys": [{"name": "team-a", "api_key": "key-a", "aliases": ["fast"]}],
@@ -18,7 +18,7 @@ V2 = {
 
 V2_B = {
     "providers": [
-        {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key": "sk-or"},
+        {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
     "aliases": {"fast": "or:gpt-4o-mini", "smart": "or:gpt-4o"},
     "keys": [
@@ -29,16 +29,19 @@ V2_B = {
 
 OLD = {
     "providers": [
-        {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key": "sk-or"},
+        {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
     "keys": [{"api_key": "legacy-key", "provider": "or"}],
 }
 
 
+ENV = {"OR_KEY": "sk-or"}
+
+
 def make_store(tmp_path, data=V2) -> ConfigStore:
     path = tmp_path / "providers.json"
     path.write_text(json.dumps(data))
-    return ConfigStore(path, base_settings=Settings(compression_threshold_tokens=100000))
+    return ConfigStore(path, base_settings=Settings(compression_threshold_tokens=100000), env=ENV)
 
 
 def test_load_initial(tmp_path):

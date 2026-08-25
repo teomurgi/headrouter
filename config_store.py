@@ -23,21 +23,38 @@ logger = logging.getLogger("headrouter.config_store")
 
 
 class ConfigStore:
-    def __init__(self, path: str | Path, base_settings: Settings | None = None):
+    def __init__(self, path: str | Path, base_settings: Settings | None = None, env: dict[str, str] | None = None):
         self.path = Path(path)
         self._base = base_settings or Settings()
+        self._env = env
         self._lock = threading.Lock()
         self._async_lock: asyncio.Lock | None = None
-        defs, keys, aliases = load_config_v2(str(self.path))
+        defs, keys, aliases = load_config_v2(str(self.path), env=self._env)
         self._settings = self._build(defs, keys, aliases)
         self._migrated_keys = {k for k, b in keys.items() if b.legacy_provider_grant}
         self._listeners: list = []
+        self._raw: dict = self._read_raw()
 
     def on_apply(self, callback) -> None:
         """Register a callable(Settings) invoked after each atomic swap."""
         self._listeners.append(callback)
 
     # -- construction -----------------------------------------------------
+
+    def _read_raw(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except OSError:
+            return {}
+
+    def sanitized_config(self) -> dict:
+        """The applied config as the admin API may return it (INV-5):
+        env-var names only, never secret values."""
+        data = json.loads(json.dumps(self._raw))  # deep copy
+        for p in data.get("providers", []):
+            p.pop("api_key", None)
+        return data
 
     def _build(self, defs, keys, aliases) -> Settings:
         return replace(
@@ -62,7 +79,11 @@ class ConfigStore:
         errors = validate_config(data)
         if errors:
             raise ConfigError("; ".join(errors))
-        defs, keys, aliases = load_config_v2(data)
+        # INV-5: the admin surface never accepts secret values.
+        for p in data.get("providers", []):
+            if p.get("api_key"):
+                raise ConfigError("providers must reference 'api_key_env', not embed 'api_key' values")
+        defs, keys, aliases = load_config_v2(data, env=self._env)
         return defs, keys, aliases
 
     def _persist(self, data: dict) -> None:
@@ -87,6 +108,7 @@ class ConfigStore:
         settings = self._build(defs, keys, aliases)
         self._migrated_keys = {k for k, b in keys.items() if b.legacy_provider_grant}
         self._settings = settings
+        self._raw = data
         for listener in self._listeners:
             listener(settings)
         logger.info(

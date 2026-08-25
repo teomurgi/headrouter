@@ -21,13 +21,35 @@ logger = logging.getLogger("headrouter.chat")
 
 router = APIRouter()
 
-_ADAPTER_CACHE: dict[str, BaseAdapter] = {}
+_ADAPTER_CACHE: dict[tuple, BaseAdapter] = {}
+
+
+def _key_display_name(settings: Settings, gateway_key: str | None) -> str:
+    binding = settings.key_binding(gateway_key)
+    if binding is not None:
+        return binding.name or "key"
+    return "admin" if gateway_key else "-"
+
+
+def _log_request(state, settings, gateway_key, alias, route, status, latency_s, **kw):
+    state.request_log.record(
+        key_name=_key_display_name(settings, gateway_key),
+        alias=alias,
+        resolved=f"{route.provider}:{route.model}",
+        status=status,
+        latency_ms=latency_s * 1000,
+        **kw,
+    )
 
 
 def get_adapter(provider: str, settings: Settings) -> BaseAdapter:
-    if provider in _ADAPTER_CACHE:
-        return _ADAPTER_CACHE[provider]
     info = settings.endpoint(provider)
+    # Cache keyed by the endpoint identity, not just the name: a config apply
+    # that changes base_url/credentials must produce a fresh adapter.
+    cache_key = (provider, info.base_url, info.api_key, info.type)
+    cached = _ADAPTER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     if info.is_openai_compat:
         adapter: BaseAdapter = OpenAICompatAdapter(info.base_url, info.api_key)
     elif info.type == "anthropic":
@@ -36,7 +58,9 @@ def get_adapter(provider: str, settings: Settings) -> BaseAdapter:
         adapter = GeminiAdapter(info.base_url, info.api_key)
     else:  # pragma: no cover - guarded by settings.endpoint
         raise KeyError(f"unknown provider type: {info.type}")
-    _ADAPTER_CACHE[provider] = adapter
+    if len(_ADAPTER_CACHE) > 64:  # bound after hot reloads
+        _ADAPTER_CACHE.clear()
+    _ADAPTER_CACHE[cache_key] = adapter
     return adapter
 
 
@@ -142,6 +166,14 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     state.metrics.observe_request(route.provider, 200, time.perf_counter() - started)
     usage = result.get("usage") or {}
     state.metrics.observe_usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+    _log_request(
+        state, settings, gateway_key, payload.model, route, 200,
+        time.perf_counter() - started,
+        tokens_in=usage.get("prompt_tokens", 0),
+        tokens_out=usage.get("completion_tokens", 0),
+        compressed=compression_result.applied,
+        tokens_saved=getattr(compression_result, "tokens_saved", 0),
+    )
 
     headers = {"X-Compression-Applied": str(compression_result.applied).lower()}
     return JSONResponse(result, headers=headers)
