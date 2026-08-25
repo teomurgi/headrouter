@@ -287,3 +287,15 @@ def test_wrong_key_specific_error_not_full_page(tmp_path, captured):
     assert r.status_code == 401
     body = r.json()
     assert "error" in body  # OpenAI-style body the gate shows inline
+
+
+# --- build marker (stale-JS confusion guard) ----------------------------------
+
+
+def test_admin_page_shows_build_and_no_store(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    r = c.get("/admin")
+    assert r.status_code == 200
+    assert "build" in r.text and 'id="build-pill"' in r.text
+    assert "build ?" not in r.text  # stamped, never left placeholder
+    assert r.headers.get("cache-control") == "no-store"

@@ -8,12 +8,13 @@ values (INV-5).
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import time
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from config import ConfigError
 
@@ -42,7 +43,22 @@ def _reject_secrets(data: dict) -> list[str]:
 
 @router.get("/admin")
 async def admin_page():
-    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "admin.html", media_type="text/html")
+    build = _build_id()
+    html = (Path(__file__).resolve().parent.parent / "static" / "admin.html").read_text(encoding="utf-8")
+    # stamp the build so "am I on the new JS?" is answerable at a glance;
+    # cache-bust hard so stale tabs can't serve old script after a deploy
+    html = html.replace(">build ?</span>", f">{build}</span>")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+def _build_id() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent, text=True,
+        ).strip() or "dev"
+    except Exception:
+        return "dev"
 
 
 @router.get("/admin/config")
