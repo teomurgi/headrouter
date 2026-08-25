@@ -86,6 +86,7 @@ This is a spec'd string, not a nice-to-have: it's how a developer on team-b self
 - Empty (no keys yet / no aliases / fresh install): friendly setup nudge, "+ Add" prominent.
 - Loading (first config fetch): skeleton, not spinner-blank.
 - Validation error: inline on the offending field/card, staged bar turns error-red, Apply disabled.
+- **Failed inline-form action (negative path, all forms)**: a Stage/Add/Grant that fails validation must keep the form open with the user's entered values, show a visible `role="alert"` error line, and never silently discard input. No destructive action (clear, close, remove) runs before its validation passes.
 - Apply failure (server rejected): banner with the server's validation body verbatim; staging preserved.
 - One gateway-auth failure on admin API: full-page "unauthorized — check your gateway API key" state (no retry loop).
 - Provider unreachable: red dot + blast radius (never just a bare badge).
