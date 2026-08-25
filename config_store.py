@@ -97,11 +97,20 @@ class ConfigStore:
             if not isinstance(p, dict):
                 continue
             p.pop("api_key_set", None)  # read-only hint from GET, not input
+            if p.get("api_key") == "":
+                # explicit empty string = remove the stored credential (§3.3);
+                # distinct from absent, which means keep (write-only round-trip)
+                p.pop("api_key")
+                p["_strip_credential"] = True
+                continue
             if p.get("api_key"):
                 continue
             saved = saved_providers.get(p.get("name"))
-            if saved is not None and saved.get("api_key"):
+            if saved is not None and saved.get("api_key") and not saved.get("_strip_credential"):
                 p["api_key"] = saved["api_key"]  # blank-on-edit keeps existing
+        for p in data.get("providers", []):
+            if isinstance(p, dict):
+                p.pop("_strip_credential", None)
         # Keys with neither api_key nor api_key_env: reuse the stored value if
         # this is an existing key (GET strips values, so round-trips must not
         # regenerate them); otherwise generate one server-side (issue-key

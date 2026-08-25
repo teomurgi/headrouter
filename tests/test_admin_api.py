@@ -365,3 +365,34 @@ def test_apply_unwritable_config_file_specific_error(tmp_path, captured, monkeyp
     msg = str(body.get("detail") or body)
     assert "providers.json" in msg, msg
     assert any(k in msg for k in ("Permission", "denied", "Is a directory", "Not a directory", "Errno")), msg
+
+
+# --- credential removal (§3.3): explicit empty api_key strips, absent keeps ---
+
+
+def test_apply_empty_api_key_strips_credential(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    staged = json.loads(json.dumps(V2))
+    staged["providers"][0].pop("api_key_env")
+    staged["providers"][0]["api_key"] = "sk-first"
+    assert c.put("/admin/config", headers=H, json=staged).status_code == 200
+    # explicit empty string = remove the stored credential
+    staged["providers"][0]["api_key"] = ""
+    assert c.put("/admin/config", headers=H, json=staged).status_code == 200
+    disk = json.loads((tmp_path / "providers.json").read_text())
+    assert "api_key" not in disk["providers"][0]
+    assert "api_key_env" not in disk["providers"][0]
+    got = c.get("/admin/config", headers=H).json()
+    assert got["providers"][0]["api_key_set"] is False
+
+
+def test_apply_absent_api_key_keeps_credential(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    staged = json.loads(json.dumps(V2))
+    staged["providers"][0].pop("api_key_env")
+    staged["providers"][0]["api_key"] = "sk-first"
+    assert c.put("/admin/config", headers=H, json=staged).status_code == 200
+    staged["providers"][0].pop("api_key")  # absent = keep (write-only round-trip)
+    assert c.put("/admin/config", headers=H, json=staged).status_code == 200
+    disk = json.loads((tmp_path / "providers.json").read_text())
+    assert disk["providers"][0]["api_key"] == "sk-first"
