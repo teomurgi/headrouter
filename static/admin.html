@@ -374,6 +374,14 @@ function bannerError(msg) {
   bar.focus(); // alertdialog must receive focus to be announced
 }
 
+// Safe JSON reader: server errors (500s, proxies) may return plain text —
+// a parse failure must surface "HTTP {status}", never a silent throw.
+async function readJson(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); }
+  catch (e) { return {_parse_error: true, _status: r.status, _text: text.slice(0, 200)}; }
+}
+
 // ---------- keys & aliases render ----------
 function renderAliases() {
   const cfg = state.staged || state.saved;
@@ -642,14 +650,16 @@ document.addEventListener("click", async (e) => {
   }
   if (t.id === "validate") {
     const r = await api("/admin/config/validate", {method: "POST", body: JSON.stringify(state.staged)});
-    const b = await r.json();
+    const b = await readJson(r);
+    if (b._parse_error) { bannerError(`validation endpoint returned HTTP ${b._status} — server error, staging preserved`); announce("validate failed: HTTP " + b._status); return; }
     if (b.valid) { $("stage-msg").textContent = "✓ valid — ready to Apply"; announce("validation passed"); }
     else { bannerError(b.errors.join("; ")); announce("validation failed"); }
     return;
   }
   if (t.id === "apply") {
     const r = await api("/admin/config", {method: "PUT", body: JSON.stringify(state.staged)});
-    const b = await r.json();
+    const b = await readJson(r);
+    if (b._parse_error) { bannerError(`apply returned HTTP ${b._status} — server error, staging preserved`); announce("apply failed: HTTP " + b._status); return; }
     if (!r.ok) {
       bannerError("server rejected: " + (b.detail && b.detail.errors ? b.detail.errors.join("; ") : JSON.stringify(b.detail)));
       announce("apply rejected — staging preserved");
