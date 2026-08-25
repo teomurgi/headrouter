@@ -4,7 +4,7 @@
       "name": "my-openai",
       "type": "openai",
       "base_url": "https://api.openai.com/v1",
-      "api_key": "sk-..."
+      "api_key_env": "MY_OPENAI_KEY"
     },
     {
       "name": "work-claude",
@@ -21,20 +21,26 @@
       "name": "google",
       "type": "gemini",
       "base_url": "https://generativelanguage.googleapis.com",
-      "api_key": "..."
+      "api_key_env": "GEMINI_API_KEY"
     }
   ],
+  "aliases": {
+    "fast": "my-openai:gpt-4o-mini",
+    "smart": "my-openai:gpt-4o",
+    "sonnet": "work-claude:claude-sonnet-4",
+    "local": "local:llama3.1",
+    "gem": "google:gemini-1.5-pro"
+  },
   "keys": [
     {
-      "api_key": "key-team-a",
-      "provider": "my-openai"
+      "name": "team-a",
+      "api_key_env": "KEY_TEAM_A",
+      "aliases": ["fast", "local"]
     },
     {
-      "api_key": "key-team-b",
-      "provider": "work-claude",
-      "routes": {
-        "gpt4o": "claude-sonnet-4"
-      }
+      "name": "team-b",
+      "api_key_env": "KEY_TEAM_B",
+      "aliases": ["sonnet", "fast"]
     }
   ]
 }
