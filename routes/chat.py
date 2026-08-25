@@ -13,7 +13,7 @@ from adapters import AdapterError, BaseAdapter
 from adapters.openai_compat import OpenAICompatAdapter
 from adapters.anthropic import AnthropicAdapter
 from adapters.gemini import GeminiAdapter
-from config import Settings
+from config import ModelNotGranted, Settings
 from schemas import ChatCompletionRequest
 from .request_compression import compress_request_messages
 
@@ -53,7 +53,21 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     state = request.app.state
     settings: Settings = state.settings
 
-    route = settings.resolve(payload.model, getattr(request.state, "gateway_key", None))
+    gateway_key = getattr(request.state, "gateway_key", None)
+    try:
+        route = settings.resolve(payload.model, gateway_key)
+    except ModelNotGranted as exc:
+        logger.warning(
+            "chat routing error method=%s path=%s model=%s status=404 code=model_not_granted",
+            request.method, request.url.path, payload.model,
+        )
+        return _error(
+            404,
+            f"Model '{exc.model}' is not available for this key. "
+            f"Available models: {', '.join(exc.available)}. See GET /v1/models.",
+            "invalid_request_error",
+            "model_not_available_for_key",
+        )
     if route is None:
         logger.warning(
             "chat routing error method=%s path=%s model=%s status=404 code=model_not_found",

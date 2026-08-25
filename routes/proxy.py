@@ -21,7 +21,7 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from config import Settings
+from config import ModelNotGranted, Settings
 from .request_compression import compress_request_messages
 
 logger = logging.getLogger("headrouter.proxy")
@@ -52,13 +52,16 @@ MAX_ERROR_LOG_BYTES = 16 * 1024
 
 
 def _resolve_route(request: Request, body: bytes, settings: Settings):
-    """Return (provider, target_model) or None."""
+    """Return (provider, target_model), 'denied' for a closed-resolution miss, or None."""
     gateway_key = getattr(request.state, "gateway_key", None)
     if body:
         try:
             model = json.loads(body).get("model")
             if isinstance(model, str):
-                route = settings.resolve(model, gateway_key)
+                try:
+                    route = settings.resolve(model, gateway_key)
+                except ModelNotGranted as exc:
+                    return "denied", exc
                 if route is not None:
                     return route.provider, route.model
         except Exception:
@@ -69,6 +72,20 @@ def _resolve_route(request: Request, body: bytes, settings: Settings):
     if settings.default_route is not None:
         return settings.default_route.provider, None
     return None
+
+
+def _denied_response(exc) -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": {
+                "message": f"Model '{exc.model}' is not available for this key. "
+                f"Available models: {', '.join(exc.available)}. See GET /v1/models.",
+                "type": "invalid_request_error",
+                "code": "model_not_available_for_key",
+            }
+        },
+        status_code=404,
+    )
 
 
 def _target_url(base_url: str, path: str, is_openai_compat: bool, query: str) -> str:
@@ -132,6 +149,8 @@ async def proxy_all(path: str, request: Request):
         request_stream = request.stream()
 
     resolved = _resolve_route(request, body, settings)
+    if isinstance(resolved, tuple) and resolved and resolved[0] == "denied":
+        return _denied_response(resolved[1])
     if resolved is None:
         if request_stream is not None:
             await request_stream.aclose()
