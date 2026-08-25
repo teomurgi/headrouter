@@ -53,7 +53,7 @@ Two sections, Aliases above Keys (the menu before the diners).
 
 ### 3.3 Providers page (`providers.html` in the sketch)
 
-- Card per provider: name, type dropdown, base URL, **API key env-var name** (the field's help text must say: "Only the variable name is stored; the value lives in the server's environment").
+- Card per provider: name, type dropdown, base URL, **API key** — write-only: paste a plain key once ("stored server-side, never displayed") *or* an env-var name; pasted values are never shown back (GET returns only "set / not set"), and leaving the field blank on edit keeps the existing credential. *(Plain-key support implemented in `acb5ee2`; env-var name remains supported.)*
 - **+ Add provider** stages a new card (name, type dropdown — `KNOWN_PROVIDERS` presets plus `openai-compat` custom — free-text base URL, env-var name). **✎ edit in place** (rename auto-re-points aliases). **✕ remove** confirms blast radius ("N aliases affected") before staging. Provider staging rides the same shared stage→validate→apply bar as Keys & Aliases (§3.2 semantics apply verbatim: client diff, server errors inline, staging preserved on rejection, re-fetch after Apply). Renaming/removing a provider that aliases point to shows the blast radius before Apply; dangling-alias applies surface the server's validation error inline rather than being pre-blocked. *(Implemented in `ba45394`.)*
 - **Test connection** button → `/admin/health/providers` refresh for that provider; inline result.
 - Health line includes blast radius: "unreachable since 14:02 — N aliases affected: fast, smart".
@@ -100,7 +100,8 @@ This is a spec'd string, not a nice-to-have: it's how a developer on team-b self
 
 ## 7. Security posture in the UI
 
-- The browser never receives or sends key *values* (only env-var names and generated-once keys).
+- The browser never *receives* key or provider-credential values: generated keys are shown once (§4 flow), pasted provider keys are write-only (server stores; GET returns "set / not set" only). Env-var names remain the alternative path.
+- Provider credentials may be pasted once into the admin form; they are never displayed again, never stored client-side, and blank-on-edit preserves the existing value. *(INV-5 two-clause split per architecture.md; implemented in `acb5ee2`.)*
 - Generated keys shown once (§4 flow), never stored client-side (no localStorage).
 - Admin surface inherits gateway auth; no separate login in v1.
 
