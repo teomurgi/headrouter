@@ -83,6 +83,8 @@
   .banner .msg { flex:1; color:var(--warn); min-width:200px; }
   .banner.err { border-color:var(--err); }
   .banner.err .msg { color:var(--err); }
+  .banner.ok { border-color:var(--ok); }
+  .banner.ok .msg { color:var(--ok); }
   .banner .note { flex-basis:100%; color:var(--muted); font-size:11px; }
   .stage-form { background:var(--panel); border:1px dashed var(--accent); border-radius:8px; padding:10px 14px; margin:8px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
   .stage-form .field { flex:1; min-width:160px; }
@@ -364,6 +366,7 @@ function renderDiff() {
   bar.hidden = false;
   $("stage-msg").textContent = `⚠ ${lines.length} staged change(s). Validation: every key needs ≥1 alias; alias names must be unique.`;
   bar.classList.remove("err");
+  bar.classList.remove("ok");
   $("apply").disabled = false;
   $("validate").disabled = false;
 }
@@ -679,15 +682,19 @@ document.addEventListener("click", async (e) => {
     // re-fetch and re-render from the server (spec §3.2): never merge PUT into local state
     await loadConfig();
     showGeneratedModal(b.generated);
-    // visible success feedback: the staging bar hides on re-render, so show a
-    // transient confirmation the user can actually see (not announce-only)
-    const ok = document.createElement("div");
-    ok.className = "banner ok-banner";
-    ok.setAttribute("role", "status");
-    ok.textContent = `✓ applied ${state.migrated.size ? "(incl. migrated keys) " : ""}— config is live`;
-    const m = document.querySelector("main");
-    m.prepend(ok);
-    setTimeout(() => ok.remove(), 6000);
+    // visible success feedback: show it IN the sticky staging bar itself —
+    // exactly where the Apply button the user just clicked lives (§3.2)
+    const bar = $("stage-bar");
+    bar.classList.remove("err");
+    bar.classList.add("ok");
+    bar.removeAttribute("role"); bar.setAttribute("role", "status");
+    bar.hidden = false;
+    $("stage-msg").textContent = `✓ applied ${state.migrated.size ? "(incl. migrated keys) " : ""}— config is live`;
+    $("apply").disabled = true; $("validate").disabled = true; $("discard").hidden = true; $("validate").hidden = true;
+    setTimeout(() => {
+      $("discard").hidden = false; $("validate").hidden = false;
+      renderDiff(); // hides the bar if nothing new is staged
+    }, 6000);
     announce("applied — in-flight requests may still complete");
     return;
   }
