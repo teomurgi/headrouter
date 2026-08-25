@@ -252,7 +252,12 @@ def validate_config(data: dict) -> list[str]:
         errors.append("'aliases' must be an object of {name: 'provider:model'}")
         raw_aliases = {}
     for name, target in raw_aliases.items():
-        route = _parse_route(str(target))
+        if not isinstance(target, str):
+            errors.append(
+                f"alias '{name}': expected 'provider:model' string, got {type(target).__name__}"
+            )
+            continue
+        route = _parse_route(target)
         if route is None:
             errors.append(f"alias '{name}': invalid target '{target}' (expected 'provider:model')")
             continue

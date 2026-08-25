@@ -264,3 +264,20 @@ def test_granted_alias_still_proxied(captured):
         )
         assert r.status_code == 200
         assert captured["requests"][0]["url"] == "https://openrouter.example.com/v1/chat/completions"
+
+
+# --- malformed alias targets get specific errors (§5 specificity rule) -------
+
+
+def test_validate_alias_object_target_error_is_specific():
+    data = json.loads(V2_JSON)
+    data["aliases"]["fast"] = {"provider": "ghost", "model": "m"}
+    errs = validate_config(data)
+    assert any("expected 'provider:model' string" in e and "'fast'" in e for e in errs), errs
+
+
+def test_validate_alias_non_dict_error_is_specific():
+    data = json.loads(V2_JSON)
+    data["aliases"] = ["not", "an", "object"]
+    errs = validate_config(data)
+    assert any("'aliases' must be an object" in e for e in errs), errs
