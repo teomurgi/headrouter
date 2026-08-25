@@ -87,6 +87,7 @@
   .stage-form .field { flex:1; min-width:160px; }
   .stage-form .field label { margin-top:0; }
   .stage-form .hintline { flex-basis:100%; color:var(--muted); font-size:11px; }
+  .form-err { flex-basis:100%; color:var(--err); font-size:12px; }
   .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
 
   /* modal */
@@ -442,8 +443,19 @@ function stageForm(hostId, fields, hint, onSubmit) {
   form.onsubmit = (e) => {
     e.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
+    // contract: the callback returns false on invalid input — keep the form
+    // (with entered values) open and surface a visible error instead of
+    // silently discarding what the user typed.
+    let ok = true;
+    try { ok = onSubmit(values) !== false; } catch (err) { ok = false; }
+    if (!ok) {
+      let el = form.querySelector(".form-err");
+      if (!el) { el = document.createElement("div"); el.className = "form-err"; el.setAttribute("role", "alert"); form.appendChild(el); }
+      el.textContent = $("stage-live").textContent || "Invalid input — nothing staged.";
+      form.querySelector("input, select").focus();
+      return;
+    }
     host.innerHTML = "";
-    onSubmit(values);
   };
 }
 
@@ -467,7 +479,7 @@ document.addEventListener("click", async (e) => {
       {id: "target", name: "target", label: "Target provider:model", options: providers.length ? providers.map(p => p + ":") : undefined},
     ], "Model is free text after 'provider:' — providers: " + (providers.join(", ") || "none"), (v) => {
       const name = (v.name || "").trim(), target = (v.target || "").trim();
-      if (!name || !target.includes(":")) { announce("alias needs a name and a 'provider:model' target"); return; }
+      if (!name || !target.includes(":")) { announce("alias needs a name and a 'provider:model' target"); return false; }
       working().aliases = working().aliases || {};
       working().aliases[name] = target;
       renderAliases(); announceStage(`staged: alias ${name} → ${target}`);
@@ -482,7 +494,7 @@ document.addEventListener("click", async (e) => {
       {id: "name", name: "key", label: "Key name (display only)"},
     ], "The key value is generated on Apply and shown once.", (v) => {
       const name = (v.name || "").trim();
-      if (!name) { announce("key needs a name"); return; }
+      if (!name) { announce("key needs a name"); return false; }
       working().keys = working().keys || [];
       working().keys.push({name, aliases: []});
       renderKeys(); announceStage(`staged: issue key ${name} — grant at least one alias`);
@@ -560,7 +572,7 @@ document.addEventListener("click", async (e) => {
       {id: "api_key_env", name: "api_key_env", label: "…or API key env-var name", placeholder: "OPENAI_API_KEY"},
     ], "Paste a key (write-only, blank on edit keeps the current one) or give an env-var name; the value lives server-side either way.", (v) => {
       const name = (v.name || "").trim(), base = (v.base_url || "").trim(), env = (v.api_key_env || "").trim(), key = (v.api_key || "").trim();
-      if (!name || !base) { announce("provider needs a name and base URL"); return; }
+      if (!name || !base) { announce("provider needs a name and base URL"); return false; }
       const providers = working().providers = working().providers || [];
       const fields = {type: v.type, base_url: base};
       if (key) fields.api_key = key;          // write-only: sent on PUT, never in GET
@@ -577,7 +589,7 @@ document.addEventListener("click", async (e) => {
         }
         renderProviders(); announceStage(`staged: edit provider ${name}`);
       } else {
-        if (providers.some(x => x.name === name)) { announce(`provider '${name}' already exists`); return; }
+        if (providers.some(x => x.name === name)) { announce(`provider '${name}' already exists`); return false; }
         providers.push({name, ...fields});
         renderProviders(); announceStage(`staged: add provider ${name}`);
       }
