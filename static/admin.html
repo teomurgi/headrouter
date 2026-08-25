@@ -427,6 +427,7 @@ function showGeneratedModal(gen) {
 
 // ---------- staged forms (labelled inputs; Escape cancels, Enter submits) ----------
 function stageForm(hostId, fields, hint, onSubmit) {
+  document.querySelectorAll(".stage-form").forEach(f => { if (f.parentElement !== $(hostId)) f.parentElement.innerHTML = ""; }); // one form at a time (ids must stay unique)
   const host = $(hostId);
   host.innerHTML = `<form class="stage-form" role="group" aria-label="${esc(fields[0].name)} form">
     ${fields.map(f => `<div class="field"><label for="sf-${esc(f.id)}">${esc(f.label)}</label>${f.options
@@ -446,12 +447,12 @@ function stageForm(hostId, fields, hint, onSubmit) {
     // contract: the callback returns false on invalid input — keep the form
     // (with entered values) open and surface a visible error instead of
     // silently discarding what the user typed.
-    let ok = true;
-    try { ok = onSubmit(values) !== false; } catch (err) { ok = false; }
-    if (!ok) {
+    let err = null;
+    try { err = onSubmit(values); } catch (ex) { err = "Invalid input — nothing staged."; }
+    if (err) {
       let el = form.querySelector(".form-err");
       if (!el) { el = document.createElement("div"); el.className = "form-err"; el.setAttribute("role", "alert"); form.appendChild(el); }
-      el.textContent = $("stage-live").textContent || "Invalid input — nothing staged.";
+      el.textContent = typeof err === "string" ? err : "Invalid input — nothing staged.";
       form.querySelector("input, select").focus();
       return;
     }
@@ -479,7 +480,7 @@ document.addEventListener("click", async (e) => {
       {id: "target", name: "target", label: "Target provider:model", options: providers.length ? providers.map(p => p + ":") : undefined},
     ], "Model is free text after 'provider:' — providers: " + (providers.join(", ") || "none"), (v) => {
       const name = (v.name || "").trim(), target = (v.target || "").trim();
-      if (!name || !target.includes(":")) { announce("alias needs a name and a 'provider:model' target"); return false; }
+      if (!name || !target.includes(":")) { const m = "alias needs a name and a 'provider:model' target"; announce(m); return m; }
       working().aliases = working().aliases || {};
       working().aliases[name] = target;
       renderAliases(); announceStage(`staged: alias ${name} → ${target}`);
@@ -494,7 +495,7 @@ document.addEventListener("click", async (e) => {
       {id: "name", name: "key", label: "Key name (display only)"},
     ], "The key value is generated on Apply and shown once.", (v) => {
       const name = (v.name || "").trim();
-      if (!name) { announce("key needs a name"); return false; }
+      if (!name) { const m = "key needs a name"; announce(m); return m; }
       working().keys = working().keys || [];
       working().keys.push({name, aliases: []});
       renderKeys(); announceStage(`staged: issue key ${name} — grant at least one alias`);
@@ -572,7 +573,7 @@ document.addEventListener("click", async (e) => {
       {id: "api_key_env", name: "api_key_env", label: "…or API key env-var name", placeholder: "OPENAI_API_KEY"},
     ], "Paste a key (write-only, blank on edit keeps the current one) or give an env-var name; the value lives server-side either way.", (v) => {
       const name = (v.name || "").trim(), base = (v.base_url || "").trim(), env = (v.api_key_env || "").trim(), key = (v.api_key || "").trim();
-      if (!name || !base) { announce("provider needs a name and base URL"); return false; }
+      if (!name || !base) { const m = "provider needs a name and base URL — which field is empty?"; announce(m); return m; }
       const providers = working().providers = working().providers || [];
       const fields = {type: v.type, base_url: base};
       if (key) fields.api_key = key;          // write-only: sent on PUT, never in GET
@@ -589,7 +590,7 @@ document.addEventListener("click", async (e) => {
         }
         renderProviders(); announceStage(`staged: edit provider ${name}`);
       } else {
-        if (providers.some(x => x.name === name)) { announce(`provider '${name}' already exists`); return false; }
+        if (providers.some(x => x.name === name)) { const m = `provider '${name}' already exists — pick another name`; announce(m); return m; }
         providers.push({name, ...fields});
         renderProviders(); announceStage(`staged: add provider ${name}`);
       }
