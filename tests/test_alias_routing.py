@@ -281,3 +281,12 @@ def test_validate_alias_non_dict_error_is_specific():
     data["aliases"] = ["not", "an", "object"]
     errs = validate_config(data)
     assert any("'aliases' must be an object" in e for e in errs), errs
+
+
+def test_validate_rejects_admin_flag_on_keys():
+    # keys[].admin is dead config with teeth: admin comes solely from
+    # GATEWAY_API_KEYS (INV-9) — accept-and-ignore would mislead hand-editors.
+    data = json.loads(V2_JSON)
+    data["keys"][0]["admin"] = True
+    errs = validate_config(data)
+    assert any("GATEWAY_API_KEYS" in e and "'admin'" in e for e in errs), errs

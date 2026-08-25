@@ -276,6 +276,11 @@ def validate_config(data: dict) -> list[str]:
             errors.append(f"key entry #{i} must be an object")
             continue
         name = str(entry.get("name") or f"key #{i}")
+        if "admin" in entry:
+            errors.append(
+                f"key '{name}': the 'admin' field is rejected — admin access comes from "
+                "GATEWAY_API_KEYS; remove the 'admin' field"
+            )
         granted = entry.get("aliases")
         if not isinstance(granted, list) or not granted:
             errors.append(f"key '{name}' needs at least one alias")
