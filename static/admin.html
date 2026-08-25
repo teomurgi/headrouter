@@ -83,6 +83,10 @@
   .banner.err { border-color:var(--err); }
   .banner.err .msg { color:var(--err); }
   .banner .note { flex-basis:100%; color:var(--muted); font-size:11px; }
+  .stage-form { background:var(--panel); border:1px dashed var(--accent); border-radius:8px; padding:10px 14px; margin:8px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .stage-form .field { flex:1; min-width:160px; }
+  .stage-form .field label { margin-top:0; }
+  .stage-form .hintline { flex-basis:100%; color:var(--muted); font-size:11px; }
   .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
 
   /* modal */
@@ -148,6 +152,7 @@
       <button class="act" id="add-alias">+ Add alias</button>
     </div>
     <div class="aliases" id="alias-list" role="list" aria-label="Global aliases"></div>
+    <div id="alias-form-host"></div>
 
     <div class="bar">
       <h2>Keys</h2>
@@ -156,6 +161,7 @@
       <button class="act" id="add-key">+ Issue key</button>
     </div>
     <div id="key-list"></div>
+    <div id="key-form-host"></div>
 
     <div class="diff" id="diff" role="region" aria-label="Pending changes" hidden></div>
     <div class="banner" id="stage-bar" role="status" hidden>
@@ -246,6 +252,17 @@ function renderDiff() {
 }
 
 function announceStage(msg) { announce(msg); renderDiff(); }
+
+function bannerError(msg) {
+  const bar = $("stage-bar");
+  bar.hidden = false;
+  bar.classList.add("err");
+  bar.setAttribute("role", "alertdialog");
+  bar.setAttribute("tabindex", "-1");
+  $("stage-msg").textContent = "✖ " + msg;
+  $("apply").disabled = true;
+  bar.focus(); // alertdialog must receive focus to be announced
+}
 
 // ---------- keys & aliases render ----------
 function renderAliases() {
@@ -390,6 +407,29 @@ function showGeneratedModal(gen) {
   };
 }
 
+// ---------- staged forms (labelled inputs; Escape cancels, Enter submits) ----------
+function stageForm(hostId, fields, hint, onSubmit) {
+  const host = $(hostId);
+  host.innerHTML = `<form class="stage-form" role="group" aria-label="${esc(fields[0].name)} form">
+    ${fields.map(f => `<div class="field"><label for="sf-${esc(f.id)}">${esc(f.label)}</label>${f.options
+      ? `<select id="sf-${esc(f.id)}" name="${esc(f.id)}">${f.options.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`
+      : `<input id="sf-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off">`}</div>`).join("")}
+    <div class="field" style="flex:0"><button class="act primary" type="submit">Stage</button>
+    <button class="act" type="button" data-cancel>Cancel</button></div>
+    ${hint ? `<div class="hintline">${esc(hint)}</div>` : ""}
+  </form>`;
+  const form = host.querySelector("form");
+  form.querySelector("input, select").focus();
+  form.onkeydown = (e) => { if (e.key === "Escape") { host.innerHTML = ""; } };
+  form.querySelector("[data-cancel]").onclick = () => { host.innerHTML = ""; };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const values = Object.fromEntries(new FormData(form).entries());
+    host.innerHTML = "";
+    onSubmit(values);
+  };
+}
+
 // ---------- actions ----------
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("button"); if (!t) return;
@@ -403,23 +443,33 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (t.id === "add-alias") {
-    const name = prompt("Alias name:"); if (!name) return;
     const cfg = state.saved;
-    const target = prompt(`Target 'provider:model' (providers: ${(cfg.providers || []).map(p => p.name).join(", ") || "none"}):`);
-    if (!target) return;
-    working().aliases = working().aliases || {};
-    working().aliases[name] = target;
-    renderAliases(); announceStage(`staged: alias ${name} → ${target}`);
+    const providers = (cfg.providers || []).map(p => p.name);
+    stageForm("alias-form-host", [
+      {id: "name", name: "alias", label: "Alias name"},
+      {id: "target", name: "target", label: "Target provider:model", options: providers.length ? providers.map(p => p + ":") : undefined},
+    ], "Model is free text after 'provider:' — providers: " + (providers.join(", ") || "none"), (v) => {
+      const name = (v.name || "").trim(), target = (v.target || "").trim();
+      if (!name || !target.includes(":")) { announce("alias needs a name and a 'provider:model' target"); return; }
+      working().aliases = working().aliases || {};
+      working().aliases[name] = target;
+      renderAliases(); announceStage(`staged: alias ${name} → ${target}`);
+    });
     return;
   }
   const delAlias = t.getAttribute("data-delalias");
   if (delAlias) { delete working().aliases[delAlias]; renderAliases(); announceStage(`staged: delete alias ${delAlias}`); return; }
 
   if (t.id === "add-key") {
-    const name = prompt("Key name (display only):"); if (!name) return;
-    working().keys = working().keys || [];
-    working().keys.push({name, aliases: []});
-    renderKeys(); announceStage(`staged: issue key ${name} — grant at least one alias`);
+    stageForm("key-form-host", [
+      {id: "name", name: "key", label: "Key name (display only)"},
+    ], "The key value is generated on Apply and shown once.", (v) => {
+      const name = (v.name || "").trim();
+      if (!name) { announce("key needs a name"); return; }
+      working().keys = working().keys || [];
+      working().keys.push({name, aliases: []});
+      renderKeys(); announceStage(`staged: issue key ${name} — grant at least one alias`);
+    });
     return;
   }
   const delKey = t.getAttribute("data-delkey");
@@ -440,10 +490,13 @@ document.addEventListener("click", async (e) => {
       return k && !k.aliases.includes(a);
     });
     if (!avail.length) { announce("no ungranted aliases left"); return; }
-    const a = prompt(`Grant which alias? (${avail.join(", ")})`);
-    if (!a || !avail.includes(a)) return;
-    working().keys.find(k => (k.name || k.api_key_env) === grant).aliases.push(a);
-    renderKeys(); announceStage(`staged: grant alias ${a} to ${grant}`);
+    stageForm("key-form-host", [
+      {id: "alias", name: "grant", label: `Grant alias to ${grant}`, options: avail},
+    ], "One click to stage the grant.", (v) => {
+      const a = v.alias;
+      working().keys.find(k => (k.name || k.api_key_env) === grant).aliases.push(a);
+      renderKeys(); announceStage(`staged: grant alias ${a} to ${grant}`);
+    });
     return;
   }
 
@@ -455,21 +508,14 @@ document.addEventListener("click", async (e) => {
     const r = await api("/admin/config/validate", {method: "POST", body: JSON.stringify(state.staged)});
     const b = await r.json();
     if (b.valid) { $("stage-msg").textContent = "✓ valid — ready to Apply"; announce("validation passed"); }
-    else {
-      const bar = $("stage-bar"); bar.classList.add("err"); bar.setAttribute("role", "alertdialog");
-      $("stage-msg").textContent = "✖ " + b.errors.join("; ");
-      $("apply").disabled = true;
-      announce("validation failed");
-    }
+    else { bannerError(b.errors.join("; ")); announce("validation failed"); }
     return;
   }
   if (t.id === "apply") {
     const r = await api("/admin/config", {method: "PUT", body: JSON.stringify(state.staged)});
     const b = await r.json();
     if (!r.ok) {
-      const bar = $("stage-bar"); bar.classList.add("err"); bar.setAttribute("role", "alertdialog");
-      $("stage-msg").textContent = "✖ server rejected: " + (b.detail && b.detail.errors ? b.detail.errors.join("; ") : JSON.stringify(b.detail));
-      $("apply").disabled = true;
+      bannerError("server rejected: " + (b.detail && b.detail.errors ? b.detail.errors.join("; ") : JSON.stringify(b.detail)));
       announce("apply rejected — staging preserved");
       return;
     }
