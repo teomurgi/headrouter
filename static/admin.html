@@ -97,6 +97,10 @@
   .modal .val { font-family:var(--mono); background:var(--bg); border:1px dashed var(--warn); border-radius:6px; padding:8px 10px; word-break:break-all; margin:10px 0; }
   .modal .warn-copy { color:var(--warn); font-size:12px; margin-bottom:12px; }
 
+  .gate { display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--warn); border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; }
+  .gate label { margin:0; }
+  .gate input { width:auto; min-width:220px; }
+  .gate .err { color:var(--err); flex-basis:100%; }
   .banner-error-page { border:1px solid var(--err); color:var(--err); border-radius:8px; padding:14px; margin:16px; }
   .skel { background:linear-gradient(90deg,var(--panel),var(--line),var(--panel)); color:transparent; border-radius:6px; animation:pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.5; } }
@@ -116,6 +120,14 @@
 
 <div id="auth-error" class="banner-error-page" hidden>
   ⚠ unauthorized — check your gateway API key. The admin surface inherits gateway auth; there is no separate login.
+</div>
+
+<div class="gate" id="key-gate" hidden>
+  <label for="gate-key">Gateway API key:</label>
+  <input id="gate-key" type="password" autocomplete="off" placeholder="paste your gateway key">
+  <button class="act primary" id="gate-save">Connect</button>
+  <button class="act" id="gate-dismiss" aria-label="Dismiss and stop polling">✕</button>
+  <span class="err" id="gate-err" role="alert" aria-live="polite"></span>
 </div>
 
 <main>
@@ -204,9 +216,82 @@ const state = {
 
 // ---------- helpers ----------
 async function api(path, opts) {
-  const r = await fetch(path, Object.assign({headers: {"Content-Type": "application/json"}}, opts));
-  if (r.status === 401) { $("auth-error").hidden = false; document.querySelector("main").hidden = true; throw new Error("unauthorized"); }
+  const headers = {"Content-Type": "application/json"};
+  const key = sessionStorage.getItem("hr_admin_key") || state.gateKey || "";
+  if (key) headers["Authorization"] = "Bearer " + key;
+  const r = await fetch(path, Object.assign({headers}, opts));
+  if (r.status === 401) { onAuthFailure(key); throw new Error("unauthorized"); }
+  if (key && r.ok) { state.authFails = 0; $("key-gate").hidden = true; }
   return r;
+}
+
+// ---------- key gate (§5 auth state) ----------
+function onAuthFailure(keyPresent) {
+  if (!keyPresent) {
+    // naked fetch: show the gate, keep the page (skeleton) visible
+    $("key-gate").hidden = false;
+    $("gate-err").textContent = "";
+    $("gate-key").focus();
+    return;
+  }
+  state.authFails = (state.authFails || 0) + 1;
+  if (state.authFails >= 3) {
+    // repeated 401s WITH a key: escalate to full-page (no retry loop)
+    $("auth-error").hidden = false;
+    document.querySelector("main").hidden = true;
+    $("key-gate").hidden = false;
+    $("gate-err").textContent = "key rejected repeatedly — check it and reconnect";
+    stopPolling();
+    return;
+  }
+  $("key-gate").hidden = false;
+  $("gate-err").textContent = "wrong key — rejected by the gateway, try again";
+}
+
+let pollTimer = null, healthTimer = null;
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(pollLog, 2000);
+  healthTimer = setInterval(() => loadHealth(false).then(() => { renderProviders(); renderDashboard(); }).catch(() => {}), 30000);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+}
+
+function wireGate() {
+  $("gate-save").onclick = async () => {
+    const key = $("gate-key").value.trim();
+    if (!key) { $("gate-err").textContent = "enter a key — empty won't authenticate"; return; }
+    state.gateKey = key;
+    sessionStorage.setItem("hr_admin_key", key);
+    state.authFails = 0;
+    $("auth-error").hidden = true;
+    document.querySelector("main").hidden = false;
+    try {
+      await loadConfig();
+      await loadHealth();
+      renderProviders(); renderDashboard();
+      $("key-gate").hidden = true;
+      $("gate-err").textContent = "";
+      announce("connected");
+      startPolling();
+    } catch (e) {
+      if (String(e.message) === "unauthorized") {
+        $("gate-err").textContent = "wrong key — rejected by the gateway, try again";
+        sessionStorage.removeItem("hr_admin_key");
+      }
+    }
+  };
+  $("gate-key").addEventListener("keydown", (e) => { if (e.key === "Enter") $("gate-save").click(); });
+  $("gate-dismiss").onclick = () => {
+    sessionStorage.removeItem("hr_admin_key");
+    state.gateKey = "";
+    $("gate-key").value = "";
+    $("key-gate").hidden = true;
+    stopPolling();
+    announce("key cleared — polling stopped");
+  };
 }
 const clone = (x) => JSON.parse(JSON.stringify(x));
 function announce(msg) { $("stage-live").textContent = msg; }
@@ -394,7 +479,6 @@ async function pollLog() {
     }
   } catch (e) { /* transient; next tick retries */ }
 }
-setInterval(pollLog, 2000);
 
 // ---------- modal (one-time key) ----------
 function showGeneratedModal(gen) {
@@ -634,11 +718,13 @@ document.addEventListener("click", async (e) => {
 // ---------- boot ----------
 (async () => {
   try {
+    wireGate();
     await loadConfig();
     await loadHealth();
     renderProviders(); renderDashboard();
-    setInterval(() => loadHealth(false).then(() => { renderProviders(); renderDashboard(); }), 30000);
+    startPolling();
   } catch (e) {
+    // 401 path already surfaced the key gate; anything else is a real error
     if (String(e.message) !== "unauthorized") console.error(e);
   }
 })();

@@ -269,3 +269,21 @@ def test_key_values_still_rejected(tmp_path, captured):
     bad["keys"][0]["api_key"] = "sk-raw"
     r = c.put("/admin/config", headers=H, json=bad)
     assert r.status_code == 400
+
+
+# --- admin auth gate (§5 auth state): key entry, no naked-fetch dead end -----
+
+
+def test_admin_page_includes_key_gate(captured, tmp_path):
+    c, _ = make_client(tmp_path, captured)
+    html = c.get("/admin").text
+    assert 'id="key-gate"' in html
+    assert 'type="password"' in html
+
+
+def test_wrong_key_specific_error_not_full_page(tmp_path, captured):
+    c, _ = make_client(tmp_path, captured)
+    r = c.get("/admin/config", headers={"Authorization": "Bearer wrong-key"})
+    assert r.status_code == 401
+    body = r.json()
+    assert "error" in body  # OpenAI-style body the gate shows inline
