@@ -88,7 +88,7 @@ This is a spec'd string, not a nice-to-have: it's how a developer on team-b self
 - Validation error: inline on the offending field/card, staged bar turns error-red, Apply disabled.
 - **Failed inline-form action (negative path, all forms)**: a Stage/Add/Grant that fails validation must keep the form open with the user's entered values, show a **visible, specific** `role="alert"` error line — naming the offending field or the concrete conflict (e.g. "provider 'or' already exists"), never a generic "invalid input" — and never silently discard input. No destructive action (clear, close, remove) runs before its validation passes. Only one staging form is open at a time.
 - Apply failure (server rejected): banner with the server's validation body verbatim; staging preserved.
-- One gateway-auth failure on admin API: full-page "unauthorized — check your gateway API key" state (no retry loop).
+- One gateway-auth failure on admin API: on first 401, the page shows a visible **"enter gateway key"** field (password-type, labelled) — key kept in memory/sessionStorage only, sent as `Authorization: Bearer` on every admin fetch; wrong key re-shows the field with a specific error. Repeated 401s *with* a key present escalate to the full-page "unauthorized — check your gateway API key" state (no retry loop).
 - Provider unreachable: red dot + blast radius (never just a bare badge).
 
 ## 6. Accessibility requirements (hard)
@@ -104,7 +104,7 @@ This is a spec'd string, not a nice-to-have: it's how a developer on team-b self
 - The browser never *receives* key or provider-credential values: generated keys are shown once (§4 flow), pasted provider keys are write-only (server stores; GET returns "set / not set" only). Env-var names remain the alternative path.
 - Provider credentials may be pasted once into the admin form; they are never displayed again, never stored client-side, and blank-on-edit preserves the existing value. *(INV-5 two-clause split per architecture.md; implemented in `acb5ee2`.)*
 - Generated keys shown once (§4 flow), never stored client-side (no localStorage).
-- Admin surface inherits gateway auth; no separate login in v1.
+- Admin surface inherits gateway auth; no separate login in v1. The page may hold the gateway key in **sessionStorage for the tab session only** (memory-only preferred; never localStorage) — the §7 localStorage ban targets generated *key values*, not the operator's own session credential.
 
 ## 8. Evolution (explicitly deferred, matches architecture.md §7)
 
