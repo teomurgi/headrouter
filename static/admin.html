@@ -550,6 +550,17 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button"); if (!t) return;
   const w = working;
 
+  // Dead-session guard: config never loaded (unauthenticated or failed boot)
+  // -> no staging actions are meaningful. Show the key gate instead of a form
+  // that would silently fail against state.saved === null.
+  if (state.saved === null && !t.closest("#key-gate")) {
+    $("key-gate").hidden = false;
+    $("gate-err").textContent = "connect with a gateway key first — the page has no config yet";
+    $("gate-key").focus();
+    announce("not connected — enter your gateway key");
+    return;
+  }
+
   if (t.id === "tab-dashboard" || t.id === "tab-keys" || t.id === "tab-providers") {
     for (const id of ["dashboard", "keys", "providers"]) {
       $(`page-${id}`).hidden = t.id !== `tab-${id}`;
