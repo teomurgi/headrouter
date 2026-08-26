@@ -120,9 +120,12 @@ class GatewayTray:
                 )
             except Exception as exc:  # surface in the tooltip/title
                 self.proc = None
+                self._log_fh.close()
+                self._log_fh = None
                 self.icon.title = f"{APP_NAME}: failed to start ({exc})"
                 return
-        threading.Thread(target=self._watch, daemon=True).start()
+            proc = self.proc
+        threading.Thread(target=self._watch, args=(proc,), daemon=True).start()
         self._refresh()
 
     def stop(self) -> None:
@@ -149,13 +152,11 @@ class GatewayTray:
         time.sleep(0.4)
         self.start()
 
-    def _watch(self) -> None:
-        proc = self.proc
-        if proc is None:
-            return
+    def _watch(self, proc: subprocess.Popen) -> None:
         proc.wait()
-        if proc is self.proc:  # not superseded by a restart
-            self.proc = None
+        with self._lock:
+            if proc is self.proc:  # not superseded by a restart
+                self.proc = None
         self._refresh()
 
     # ----- menu ---------------------------------------------------------------

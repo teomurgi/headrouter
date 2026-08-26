@@ -16,7 +16,9 @@ import os
 block_cipher = None
 
 # Absolute path to packaging/ so this works regardless of invocation cwd.
-PKG_DIR = os.path.dirname(os.path.abspath(SPEC))  # noqa: F821  (SPEC is injected)
+# SPEC (injected by PyInstaller) points at packaging/macos/tray_macos.spec,
+# one level deeper than packaging/, hence the double dirname.
+PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(SPEC)))  # noqa: F821
 ROOT = os.path.dirname(PKG_DIR)
 
 a = Analysis(
