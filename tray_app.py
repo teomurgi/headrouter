@@ -35,6 +35,7 @@ from PIL import Image, ImageDraw
 APP_NAME = "Headrouter"
 HEALTH_PATH = "/health"
 ADMIN_PATH = "/admin"
+HELP_PATH = "/help"
 
 _state_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "headrouter"
 _state_dir.mkdir(parents=True, exist_ok=True)
@@ -178,6 +179,11 @@ class GatewayTray:
             MenuItem(
                 "Open admin UI",
                 lambda _i, _it: webbrowser.open(self.base_url + ADMIN_PATH),
+                enabled=lambda _i: self.is_running(),
+            ),
+            MenuItem(
+                "Open help",
+                lambda _i, _it: webbrowser.open(self.base_url + HELP_PATH),
                 enabled=lambda _i: self.is_running(),
             ),
             MenuItem(

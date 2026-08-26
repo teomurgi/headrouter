@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headrouter Help</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0d1117; --panel:#161b22; --line:#21262d; --fg:#c9d1d9; --muted:#8b949e;
+    --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { font:13px/1.55 var(--mono); background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:14px; color:#fff; letter-spacing:.5px; }
+  header .tag { color:var(--muted); font-size:12px; }
+  .spacer{flex:1}
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  main { padding:20px 16px 48px; max-width:920px; margin-inline:auto; }
+  h2 { font-size:15px; color:#fff; margin:28px 0 8px; padding-top:14px; border-top:1px solid var(--line); }
+  h2:first-child { border-top:none; padding-top:0; margin-top:0; }
+  h3 { font-size:13px; color:var(--accent); margin:16px 0 6px; }
+  p, li { color:var(--fg); }
+  p { margin:6px 0; }
+  ul, ol { margin:6px 0 6px 22px; }
+  li { margin:3px 0; }
+  .muted { color:var(--muted); }
+  code { background:#0a0d12; border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:12px; color:#e6edf3; }
+  pre { background:#0a0d12; border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow-x:auto; margin:10px 0; }
+  pre code { background:none; border:none; padding:0; color:var(--fg); }
+  .c-key { color:var(--ok); }
+  .c-com { color:var(--muted); }
+  table { border-collapse:collapse; width:100%; margin:10px 0; }
+  th, td { border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top; }
+  th { background:var(--panel); color:#fff; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+  td code { white-space:nowrap; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin:10px 0; }
+  .card.warn { border-color:var(--warn); }
+  .card.warn .card-t { color:var(--warn); }
+  .card-t { font-weight:700; color:#fff; margin-bottom:4px; }
+  .nav { display:flex; gap:14px; flex-wrap:wrap; margin:4px 0 18px; font-size:12px; }
+  .nav a { color:var(--muted); }
+  .nav a:hover { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Headrouter</h1>
+  <span class="tag">Help &amp; Configuration</span>
+  <span class="spacer"></span>
+  <a href="/admin">Admin UI →</a>
+</header>
+<main>
+
+<nav class="nav">
+  <a href="#what">What it does</a>
+  <a href="#env">Environment variables</a>
+  <a href="#desktop">Desktop / tray install</a>
+  <a href="#config">providers.json</a>
+  <a href="#clients">Pointing clients</a>
+  <a href="#trouble">Troubleshooting</a>
+</nav>
+
+<h2 id="what">What it does</h2>
+<p>Headrouter is a stateless OpenAI-compatible gateway. It accepts <code>/v1/chat/completions</code> requests, optionally compresses the conversation with <strong>headroom</strong>, then routes to a provider (OpenAI, Anthropic, Gemini, Ollama, OpenRouter, or any OpenAI-compatible endpoint) through named <em>aliases</em> with per-key entitlements.</p>
+<ul>
+  <li><strong>Provider</strong> — where requests go (<code>base_url</code> + credential).</li>
+  <li><strong>Alias</strong> — a named route, e.g. <code>fast → or:gpt-4o-mini</code>. Clients only send alias names.</li>
+  <li><strong>Key</strong> — a downstream credential granted a set of aliases.</li>
+</ul>
+
+<h2 id="env">Environment variables</h2>
+<p class="muted">All behavior is driven by env vars. Which ones actually reach the gateway depends on how you run it — see <a href="#desktop">Desktop / tray install</a> for the important difference.</p>
+
+<table>
+  <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+  <tr><td><code>HOST</code> / <code>PORT</code></td><td><code>0.0.0.0</code> / <code>8000</code></td><td>Listen address. The tray forces <code>127.0.0.1</code>.</td></tr>
+  <tr><td><code>GATEWAY_API_KEYS</code></td><td><em>empty</em></td><td>Comma-separated <strong>admin</strong> keys (full routing power + access to <code>/admin</code>). Empty disables auth entirely. Scoped keys from providers.json get 403 on admin.</td></tr>
+  <tr><td><code>GATEWAY_PROVIDERS_FILE</code></td><td><em>empty</em></td><td>Path to a providers.json (providers/aliases/keys). The desktop launcher defaults this to <code>~/.config/headrouter/providers.json</code>.</td></tr>
+  <tr><td><code>GATEWAY_PROVIDERS</code></td><td><em>empty</em></td><td>Inline JSON alternative to the file above.</td></tr>
+  <tr><td><code>GATEWAY_ROUTES</code></td><td><em>empty</em></td><td><code>alias=provider:model,...</code> env-based routing (admin keys only, no JSON needed).</td></tr>
+  <tr><td><code>GATEWAY_DEFAULT_ROUTE</code></td><td><em>empty</em></td><td><code>provider:model</code> fallback for unrouted models (admin keys).</td></tr>
+  <tr><td><code>GATEWAY_ENV_FILE</code></td><td><code>.env</code></td><td>Env file auto-loaded <em>only when running from source</em>. Not read by the frozen desktop app.</td></tr>
+  <tr><td><code>COMPRESSION_ENABLED</code></td><td><code>1</code></td><td>Enable headroom compression. Set <code>0</code> to disable.</td></tr>
+  <tr><td><code>COMPRESSION_THRESHOLD_TOKENS</code></td><td><code>0</code></td><td>Compress only when input exceeds this token budget; <code>0</code> = always compress.</td></tr>
+  <tr><td><code>COMPRESSION_STRATEGY</code></td><td><code>coding</code></td><td>Headroom profile: <code>coding</code> (recommended), <code>balanced</code>, <code>general</code>, <code>agent-90</code> (aggressive), <code>default</code> (legacy router).</td></tr>
+  <tr><td><code>COMPRESSION_PREFETCH_ENABLED</code></td><td><code>1</code></td><td>Download the ONNX model + tokenizer before accepting requests.</td></tr>
+  <tr><td><code>REQUEST_TIMEOUT_SECONDS</code></td><td><code>300</code></td><td>Upstream timeout.</td></tr>
+  <tr><td><code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>OPENROUTER_API_KEY</code></td><td></td><td>Provider credentials. Referenced from providers.json by <em>name</em> via <code>api_key_env</code> — the secret value lives only in the environment.</td></tr>
+  <tr><td><code>*_BASE_URL</code></td><td>provider defaults</td><td>Override provider endpoints (proxies, Azure-style gateways, <code>OLLAMA_BASE_URL</code>).</td></tr>
+</table>
+
+<div class="card warn">
+  <div class="card-t">⚠ Secrets in providers.json</div>
+  <p>Providers can carry a credential two ways: <code>api_key_env</code> (the <em>name</em> of an env var holding the key — the value stays out of the file) or an inline <code>api_key</code> (the literal secret <em>in</em> the file). Inline values are accepted on disk for local use but are <strong>rejected by the admin API</strong>, so prefer <code>api_key_env</code>. Either way, if the credential a provider needs isn't resolvable, requests to it fail auth upstream.</p>
+</div>
+
+<h2 id="desktop">Desktop / tray install</h2>
+<p>When installed from the <code>.deb</code> / <code>.app</code> and launched from the tray icon, the gateway runs as a <strong>frozen binary</strong> with a crucial difference:</p>
+<div class="card">
+  <div class="card-t">The desktop app does NOT read any .env file</div>
+  <p>Config and env vars come from the locations below — not from the repo's <code>.env</code> or <code>providers.json</code>.</p>
+</div>
+
+<h3>Where things live</h3>
+<table>
+  <tr><th>What</th><th>Path</th></tr>
+  <tr><td>Providers / aliases / keys</td><td><code>~/.config/headrouter/providers.json</code></td></tr>
+  <tr><td>Gateway log</td><td><code>~/.local/state/headrouter/gateway.log</code></td></tr>
+  <tr><td>Session env vars</td><td><code>~/.profile</code> (see below)</td></tr>
+</table>
+
+<h3>Setting env vars for the tray-launched gateway</h3>
+<p>The tray inherits your <strong>desktop session</strong> environment and passes it down to the gateway. Set vars in <code>~/.profile</code>, then <strong>log out and back in</strong>:</p>
+<pre><code><span class="c-com"># ~/.profile</span>
+export GATEWAY_API_KEYS=<span class="c-key">hr_...</span>          <span class="c-com"># admin key for /admin</span>
+export OPENROUTER_API_KEY=<span class="c-key">sk-or-...</span>     <span class="c-com"># credentials for api_key_env entries</span>
+<span class="c-com"># export COMPRESSION_STRATEGY=balanced</span>  <span class="c-com"># optional; default is coding</span></code></pre>
+
+<p>Quick one-off test <em>without</em> logging out (tray passes its env to the gateway):</p>
+<pre><code>pkill -f headrouter
+GATEWAY_API_KEYS=<span class="c-key">hr_...</span> COMPRESSION_STRATEGY=balanced headrouter-tray &amp;</code></pre>
+
+<h3>First run</h3>
+<ol>
+  <li>Start from the app grid (autostarts at login). The tray icon appears (greyed = stopped, color = running).</li>
+  <li>An empty config is seeded at <code>~/.config/headrouter/providers.json</code>.</li>
+  <li>Tray → <strong>Open admin UI</strong>, paste your <code>GATEWAY_API_KEYS</code> value, and add providers/aliases/keys there — <em>or</em> copy an existing <code>providers.json</code> into place and tray → <strong>Restart</strong>.</li>
+</ol>
+
+<h2 id="config">providers.json</h2>
+<pre><code>{
+  "providers": [
+    { "name": "or", "type": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY" }
+  ],
+  "aliases": { "fast": "or:gpt-4o-mini" },
+  "keys": [
+    { "name": "team-a", "api_key": "<span class="c-key">key-team-a</span>", "aliases": ["fast"] }
+  ]
+}</code></pre>
+<ul>
+  <li><strong>providers[].api_key_env</strong> — the <em>name</em> of an env var holding the credential (never the value). Alternatively use inline <code>api_key</code> to put the literal secret in the file (local use; rejected by the admin API).</li>
+  <li><strong>aliases</strong> — <code>name → "provider:model"</code>; the provider must exist. Use <code>"*"</code> in a key's <code>aliases</code> to grant all current and future aliases.</li>
+  <li><strong>keys</strong> — downstream credentials with a non-empty <code>aliases</code> grant list. Resolution is closed: a key can only reach its granted aliases.</li>
+</ul>
+<p class="muted">Easiest path: manage all of this from the <a href="/admin">Admin UI</a> (stage → validate → apply, atomic hot reload, no restart).</p>
+
+<h2 id="clients">Pointing clients at it</h2>
+<p>Any OpenAI-compatible client works. Base URL <code>http://127.0.0.1:8000/v1</code>, API key = a key from your <code>keys</code> list, model = an alias it's granted:</p>
+<pre><code>curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer <span class="c-key">key-team-a</span>" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "fast", "messages": [{"role": "user", "content": "hello"}]}'</code></pre>
+<p class="muted"><code>GET /v1/models</code> returns the models available to the authenticated key.</p>
+
+<h2 id="trouble">Troubleshooting</h2>
+<ul>
+  <li><strong>Admin page asks for a key / 403</strong> — set <code>GATEWAY_API_KEYS</code> in the session env; scoped providers.json keys get 403 on admin by design.</li>
+  <li><strong>Provider auth errors</strong> — the env var named by <code>api_key_env</code> isn't set in the gateway's environment. Add it to <code>~/.profile</code> and log out/in.</li>
+  <li><strong>No tray icon on GNOME/Wayland</strong> — install/enable the "AppIndicator and KStatusNotifierItem Support" extension.</li>
+  <li><strong>Where are the logs?</strong> — tray → <strong>Open logs</strong>, or <code>~/.local/state/headrouter/gateway.log</code>.</li>
+  <li><strong>Changes to providers.json not applied</strong> — tray → <strong>Restart</strong> (or use the Admin UI, which applies with no restart).</li>
+  <li><strong>Liveness / metrics</strong> — <code>GET /health</code>, <code>GET /metrics</code>.</li>
+</ul>
+
+</main>
+</body>
+</html>

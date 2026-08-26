@@ -38,6 +38,7 @@ a = Analysis(
         # The app package source so uvicorn can import "app:app" at runtime.
         ("../app.py", "."),
         ("../static/admin.html", "static"),
+        ("../static/help.html", "static"),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

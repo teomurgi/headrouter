@@ -65,6 +65,12 @@ async def admin_page():
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
+@router.get("/help", include_in_schema=False)
+async def help_page():
+    html = (Path(__file__).resolve().parent.parent / "static" / "help.html").read_text(encoding="utf-8")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
 def _build_id() -> str:
     try:
         return subprocess.check_output(
