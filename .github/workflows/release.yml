@@ -1,0 +1,107 @@
+name: Release bundles
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-13
+            arch: intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="$(grep -m1 '^version' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          perl -pi -e "s/(\"CFBundleShortVersionString\": )\".*\"/\$1\"$VERSION\"/" packaging/macos/tray_macos.spec
+          perl -pi -e "s/(\"CFBundleVersion\": )\".*\"/\$1\"$VERSION\"/" packaging/macos/tray_macos.spec
+
+      - name: Build project venv
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e . pyinstaller
+
+      - name: Generate icon.icns
+        run: |
+          mkdir -p icon.iconset
+          sips -z 512 512 static/icon.png --out icon.iconset/icon_512x512.png
+          sips -z 256 256 static/icon.png --out icon.iconset/icon_256x256.png
+          iconutil -c icns icon.iconset -o packaging/macos/icon.icns
+
+      - name: Build .app bundle
+        run: ./packaging/macos/build-app.sh
+
+      - name: Zip .app bundle
+        run: |
+          cd packaging/dist
+          ditto -c -k --sequesterRsrc --keepParent HeadrouterTray.app "HeadrouterTray-${VERSION}-macos-${{ matrix.arch }}.zip"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/dist/HeadrouterTray-*-macos-*.zip
+
+  linux:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system tray dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-venv \
+            python3-gi \
+            gir1.2-ayatanaappindicator3-0.1 \
+            gir1.2-gtk-3.0 \
+            libayatana-appindicator3-1
+
+      - name: Set version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="$(grep -m1 '^version' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
+          fi
+          perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          perl -pi -e "s/^Version: .*/Version: $VERSION/" packaging/ubuntu/control
+
+      - name: Build project venv
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e . pyinstaller
+
+      - name: Build .deb package
+        run: ./packaging/ubuntu/build-deb.sh
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/ubuntu/build/*.deb
