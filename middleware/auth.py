@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from collections.abc import Container
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -12,6 +13,11 @@ from starlette.responses import JSONResponse
 
 PUBLIC_PATHS = {"/", "/health", "/metrics", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect", "/admin"}
 logger = logging.getLogger("headrouter.auth")
+
+
+def _key_matches(token: str, api_keys: Container[str]) -> bool:
+    """Constant-time membership check against the configured gateway keys."""
+    return any(secrets.compare_digest(token, key) for key in api_keys)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -31,7 +37,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         api_keys = self._effective_keys()
         if api_keys and request.url.path not in PUBLIC_PATHS:
             token = self._extract_token(request)
-            if token is None or token not in api_keys:
+            if token is None or not _key_matches(token, api_keys):
                 logger.warning(
                     "authentication error method=%s path=%s status=401 reason=%s client=%s",
                     request.method,

@@ -33,6 +33,14 @@ class BaseAdapter(abc.ABC):
     def stream(self, client: httpx.AsyncClient, body: dict) -> AsyncIterator[bytes]:
         """Send a streaming request; yield OpenAI-format SSE chunk bytes."""
 
+    async def models(self, client: httpx.AsyncClient) -> list[str]:
+        """List the provider's model ids. Default: unsupported (empty list).
+
+        Used by GET /v1/models for keys holding a '*' wildcard grant, where
+        the gateway has no finite local model set to report.
+        """
+        return []
+
 
 def error_body(resp: httpx.Response) -> str:
     try:

@@ -124,6 +124,11 @@ def make_handler(captured):
                     "usage": {"prompt_tokens": 3, "total_tokens": 3},
                 },
             )
+        if request.url.path.endswith("/models"):
+            return httpx.Response(
+                200,
+                json={"object": "list", "data": [{"id": "gpt-4o", "object": "model"}, {"id": "gpt-4o-mini", "object": "model"}]},
+            )
         return httpx.Response(404, json={"error": "not found"})
 
     return handler

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import AsyncIterator
 
 import httpx
@@ -44,13 +43,16 @@ class OpenAICompatAdapter(BaseAdapter):
             async for chunk in resp.aiter_bytes():
                 yield chunk
 
+    async def models(self, client: httpx.AsyncClient) -> list[str]:
+        resp = await client.get(f"{self.base_url}/models", headers=self._headers())
+        if resp.status_code >= 400:
+            raise AdapterError(resp.status_code, error_body(resp), safe_json(resp))
+        data = resp.json()
+        return [m["id"] for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
+
 
 def safe_json(resp: httpx.Response):
     try:
         return resp.json()
     except Exception:
         return None
-
-
-def dumps(obj: dict) -> str:
-    return json.dumps(obj, separators=(",", ":"))

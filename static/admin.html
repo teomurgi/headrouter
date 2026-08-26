@@ -69,9 +69,6 @@
   .ghost:hover { color:var(--err); }
   .meta { margin-top:8px; font-size:12px; color:var(--muted); }
   .badge { font-size:10px; border:1px solid var(--warn); color:var(--warn); border-radius:8px; padding:0 6px; margin-left:6px; }
-  .alias { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; display:flex; align-items:center; gap:8px; }
-  .alias .name { color:#fff; } .alias .def { color:var(--muted); font-size:12px; } .alias .n { font-size:11px; color:var(--accent); }
-  .aliases { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   label { display:block; color:var(--muted); font-size:11px; margin:8px 0 2px; }
   input, select { font:inherit; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 8px; width:100%; }
   input:focus, select:focus, button:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
@@ -90,6 +87,12 @@
   .stage-form .field { flex:1; min-width:160px; }
   .stage-form .field label { margin-top:0; }
   .stage-form .hintline { flex-basis:100%; color:var(--muted); font-size:11px; }
+  .grants-form { display:block; }
+  .grants-form .grant-row { display:flex; gap:10px; align-items:center; margin:6px 0; }
+  .grants-form .grant-provider { flex:0 0 200px; font-weight:600; }
+  .grants-form .grant-row input { flex:1; }
+  .grants-form .field { margin-top:8px; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   .form-err { flex-basis:100%; color:var(--err); font-size:12px; }
   .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
 
@@ -114,7 +117,7 @@
   <h1>HEADROUTER</h1>
   <nav class="top" aria-label="Pages">
     <button id="tab-dashboard" aria-selected="true">Dashboard</button>
-    <button id="tab-keys" aria-selected="false">Keys &amp; Aliases</button>
+    <button id="tab-keys" aria-selected="false">Keys</button>
     <button id="tab-providers" aria-selected="false">Providers</button>
   </nav>
   <span class="spacer"></span>
@@ -150,7 +153,7 @@
           <button class="act" id="pause" aria-pressed="false">⏸ pause</button>
         </div>
         <table aria-label="Recent requests">
-          <thead><tr><th>time</th><th>key</th><th>alias</th><th>resolved</th><th>status</th><th>latency</th><th>tok in/out</th><th>compression</th></tr></thead>
+          <thead><tr><th>time</th><th>key</th><th>model</th><th>resolved</th><th>status</th><th>latency</th><th>tok in/out</th><th>compression</th></tr></thead>
           <tbody id="log-body"></tbody>
         </table>
       </div>
@@ -161,20 +164,11 @@
     </div>
   </section>
 
-  <!-- Keys & Aliases -->
-  <section id="page-keys" aria-label="Keys and aliases" hidden>
-    <div class="bar">
-      <h2>Aliases</h2>
-      <span class="hint">named model routes, defined once — clients ask for these names</span>
-      <span class="spacer"></span>
-      <button class="act" id="add-alias">+ Add alias</button>
-    </div>
-    <div class="aliases" id="alias-list" role="list" aria-label="Global aliases"></div>
-    <div id="alias-form-host"></div>
-
+  <!-- Keys -->
+  <section id="page-keys" aria-label="Keys" hidden>
     <div class="bar">
       <h2>Keys</h2>
-      <span class="hint">each downstream key is entitled to a set of aliases</span>
+      <span class="hint">each downstream key is linked to providers, with a set of enabled upstream models per provider</span>
       <span class="spacer"></span>
       <button class="act" id="add-key">+ Issue key</button>
     </div>
@@ -198,11 +192,10 @@
     <div id="provider-form-host"></div>
   </section>
 
-  <!-- shared staging bar (Keys & Aliases + Providers) -->
+  <!-- shared action bar (Keys + Providers): Apply validates server-side -->
   <div class="banner" id="stage-bar" role="status" hidden>
     <span class="msg" id="stage-msg"></span>
     <button class="act" id="discard">Discard</button>
-    <button class="act" id="validate">Validate</button>
     <button class="act primary" id="apply">Apply</button>
   </div>
 </main>
@@ -216,7 +209,7 @@ const state = {
   saved: null,      // last-fetched config (GET /admin/config)
   staged: null,     // working copy (deep clone of saved on first edit)
   log: [], filter: "all", paused: false, lastSeq: 0,
-  health: null, migrated: new Set(),
+  health: null, migrated: new Set(), formSeq: 0,
 };
 
 // ---------- helpers ----------
@@ -322,11 +315,11 @@ async function loadConfig() {
   state.staged = null;
   const logr = await api("/admin/log");
   if (logr.ok) { const b = await logr.json(); state.log = b.entries; state.lastSeq = b.last_seq; }
-  renderKeys(); renderAliases(); renderProviders(); renderDashboard();
-  renderDiff(); // staging is void after a re-fetch: hide the bar, disable apply/validate
+  renderKeys(); renderProviders(); renderDashboard();
+  renderDiff(); // pending edits are void after a re-fetch: hide the bar, disable apply
 }
 
-// ---------- staging / diff ----------
+// ---------- pending changes / diff ----------
 function stagedCount() {
   if (!dirty()) return 0;
   const s = JSON.stringify(state.staged), v = JSON.stringify(state.saved);
@@ -336,19 +329,16 @@ function renderDiff() {
   const box = $("diff"), bar = $("stage-bar");
   if (!dirty()) {
     box.hidden = true; bar.hidden = true;
-    $("apply").disabled = true; $("validate").disabled = true;  // nothing staged: no null-payload PUTs
+    $("apply").disabled = true;  // nothing pending: no null-payload PUTs
     return;
   }
   const lines = [];
-  const sa = state.saved.aliases || {}, ta = (state.staged.aliases || {});
-  for (const k of new Set([...Object.keys(sa), ...Object.keys(ta)])) {
-    if (sa[k] !== ta[k]) lines.push(`<div class="${sa[k] === undefined ? "add" : "del"}">${sa[k] === undefined ? "+" : "-"} alias ${esc(k)} → ${esc(ta[k] || sa[k])}${sa[k] !== undefined && ta[k] !== undefined ? " (changed)" : ""}</div>`);
-  }
+  const grantsOf = (k) => (k.grants || []).map(g => `${g.provider}: ${(g.models || []).join(", ")}`).join(" · ");
   const sk = new Map((state.saved.keys || []).map(k => [k.name || k.api_key_env, k]));
   const tk = new Map((state.staged.keys || []).map(k => [k.name || k.api_key_env, k]));
   for (const [n, k] of tk) {
-    if (!sk.has(n)) lines.push(`<div class="add">+ issue key ${esc(n)}, granted: ${esc((k.aliases || []).join(", "))}</div>`);
-    else if (JSON.stringify(sk.get(n)) !== JSON.stringify(k)) lines.push(`<div class="add">~ key ${esc(n)}: granted ${esc((k.aliases || []).join(", "))}</div>`);
+    if (!sk.has(n)) lines.push(`<div class="add">+ issue key ${esc(n)} — ${esc(grantsOf(k) || "no grants")}</div>`);
+    else if (JSON.stringify(sk.get(n)) !== JSON.stringify(k)) lines.push(`<div class="add">~ key ${esc(n)}: ${esc(grantsOf(k) || "no grants")}</div>`);
   }
   for (const [n] of sk) if (!tk.has(n)) lines.push(`<div class="del">- revoke key ${esc(n)}</div>`);
   const sp = new Map((state.saved.providers || []).map(p => [p.name, p]));
@@ -358,17 +348,16 @@ function renderDiff() {
     else if (JSON.stringify(sp.get(n)) !== JSON.stringify(p)) lines.push(`<div class="add">~ provider ${esc(n)}: ${esc(p.type)} ${esc(p.base_url)}${p.api_key_env ? ` · env ${esc(p.api_key_env)}` : ""}</div>`);
   }
   for (const [n, p] of sp) if (!tp.has(n)) {
-    const affected = Object.entries(state.saved.aliases || {}).filter(([, t2]) => t2.startsWith(n + ":")).map(([a]) => a);
-    lines.push(`<div class="del">- provider ${esc(n)}${affected.length ? ` (${affected.length} alias(es) dangle: ${esc(affected.join(", "))})` : ""}</div>`);
+    const affected = (state.saved.keys || []).filter(k => (k.grants || []).some(g => g.provider === n)).map(k => k.name || k.api_key_env);
+    lines.push(`<div class="del">- provider ${esc(n)}${affected.length ? ` (${affected.length} key(s) lose grants: ${esc(affected.join(", "))})` : ""}</div>`);
   }
   box.innerHTML = `<div style="color:var(--muted)">Pending changes:</div>` + lines.join("");
   box.hidden = false;
   bar.hidden = false;
-  $("stage-msg").textContent = `⚠ ${lines.length} staged change(s). Validation: every key needs ≥1 alias; alias names must be unique.`;
+  $("stage-msg").textContent = `⚠ ${lines.length} unsaved change(s). Apply validates first — invalid config is rejected and kept here.`;
   bar.classList.remove("err");
   bar.classList.remove("ok");
   $("apply").disabled = false;
-  $("validate").disabled = false;
 }
 
 function announceStage(msg) { announce(msg); renderDiff(); }
@@ -392,41 +381,28 @@ async function readJson(r) {
   catch (e) { return {_parse_error: true, _status: r.status, _text: text.slice(0, 200)}; }
 }
 
-// ---------- keys & aliases render ----------
-function renderAliases() {
-  const cfg = state.staged || state.saved;
-  const useCount = {};
-  for (const k of cfg.keys || []) for (const a of k.aliases || []) useCount[a] = (useCount[a] || 0) + 1;
-  const box = $("alias-list");
-  if (!Object.keys(cfg.aliases || {}).length) {
-    box.innerHTML = `<div class="explain">No aliases yet — "+ Add alias" creates your first named model route.</div>`;
-  } else {
-    box.innerHTML = Object.entries(cfg.aliases).map(([n, t]) =>
-      `<div class="alias" role="listitem"><span class="name">${esc(n)}</span><span class="def">${esc(t)}</span><span class="n">${useCount[n] || 0} key${useCount[n] === 1 ? "" : "s"}</span><button class="ghost" data-delalias="${esc(n)}" aria-label="Delete alias ${esc(n)}">✕</button></div>`).join("");
-  }
-}
-
+// ---------- keys render ----------
 function renderKeys() {
   const cfg = state.staged || state.saved;
-  const aliases = Object.keys(cfg.aliases || {});
   const savedNames = new Set((state.saved.keys || []).map(k => k.name));
   const box = $("key-list");
   if (!(cfg.keys || []).length) {
-    box.innerHTML = `<div class="explain">No keys yet — "+ Issue key" stages a scoped key for a team or client.</div>`;
+    box.innerHTML = `<div class="explain">No keys yet — "+ Issue key" creates a scoped key for a team or client.</div>`;
   } else {
     box.innerHTML = (cfg.keys || []).map(k => {
       const name = k.name || k.api_key_env || "key";
       const isNew = !savedNames.has(k.name);
       const migrated = state.migrated.has(k.name);
-      const chips = (k.aliases || []).map(a =>
-        `<span class="chip">${esc(a)} <button data-revoke="${esc(name)}" data-alias="${esc(a)}" aria-label="Revoke alias ${esc(a)} for ${esc(name)}">✕</button></span>`).join("");
-      const grant = `<button class="chip addchip" data-grant="${esc(name)}" aria-label="Grant alias to ${esc(name)}">+ grant alias</button>`;
+      const chips = (k.grants || []).map((g, gi) =>
+        `<span class="chip">${esc(g.provider)}: ${esc((g.models || []).join(", "))} <button data-delgrant="${esc(name)}" data-gi="${gi}" aria-label="Remove grant ${esc(g.provider)} for ${esc(name)}">✕</button></span>`).join("");
+      const grant = `<button class="chip addchip" data-addgrant="${esc(name)}" aria-label="Edit provider grants of ${esc(name)}">⚙ grants</button>`;
       return `<div class="card ${isNew ? "staged" : ""}">
         <div class="head"><span class="keyname">${esc(name)}</span>
         ${migrated ? '<span class="badge">migrated — review &amp; prune</span>' : ""}
-        <span class="state ${isNew ? "staged" : "live"}">${isNew ? "◐ staged" : "● live"}</span>
+        <span class="state ${isNew ? "staged" : "live"}">${isNew ? "◐ pending" : "● live"}</span>
         <button class="ghost" data-delkey="${esc(name)}" aria-label="Revoke key ${esc(name)}">✕ revoke</button></div>
-        <div class="chips" role="group" aria-label="Aliases granted to ${esc(name)}">${chips}${grant}</div>
+        <div class="chips" role="group" aria-label="Provider grants of ${esc(name)}">${chips}${grant}</div>
+        <div data-granthost="${esc(name)}"></div>
         <div class="meta">${isNew ? "The key value is generated on Apply and shown once — never displayed again." : `credential via <code>${esc(k.api_key_env || "server-generated value")}</code>`}</div>
       </div>`;
     }).join("");
@@ -444,27 +420,26 @@ function renderProviders() {
   const cfg = state.staged || state.saved;
   const h = state.health;
   const box = $("provider-list");
-  const aliasesOf = (p) => Object.entries(cfg.aliases || {}).filter(([, t]) => t.startsWith(p + ":")).map(([a]) => a);
   const isNew = (p) => !(state.saved.providers || []).some(x => x.name === p.name);
+  const keysOf = (p) => (cfg.keys || []).filter(k => (k.grants || []).some(g => g.provider === p)).map(k => esc(k.name || k.api_key_env));
   box.innerHTML = (cfg.providers || []).map(p => {
     const info = h && h.providers.find(x => x.name === p.name);
-    const affected = aliasesOf(p.name);
+    const affected = keysOf(p.name);
     const health = info
       ? (info.reachable
           ? `<span class="dot ok"></span> reachable (${esc(info.detail)})`
-          : `<span class="dot err"></span> unreachable — ${affected.length} alias${affected.length === 1 ? "" : "es"} affected: ${esc(affected.join(", ") || "none")}`)
+          : `<span class="dot err"></span> unreachable — ${affected.length} key${affected.length === 1 ? "" : "s"} affected: ${esc(affected.join(", ") || "none")}`)
       : `<span class="dot unknown"></span> health unknown`;
-    const keys = (cfg.keys || []).filter(k => (k.aliases || []).some(a => aliasesOf(p.name).includes(a))).map(k => esc(k.name || k.api_key_env));
     return `<div class="card ${isNew(p) ? "staged" : ""}">
       <div class="head"><span class="keyname">${esc(p.name)}</span>
-        <span class="state ${isNew(p) ? "staged" : "live"}">${isNew(p) ? "◐ staged" : "● " + esc(p.type)}</span>
+        <span class="state ${isNew(p) ? "staged" : "live"}">${isNew(p) ? "◐ pending" : "● " + esc(p.type)}</span>
         <button class="ghost" data-editprovider="${esc(p.name)}" aria-label="Edit provider ${esc(p.name)}">✎ edit</button>
         <button class="ghost" data-delprovider="${esc(p.name)}" aria-label="Remove provider ${esc(p.name)}">✕ remove</button></div>
       <div class="meta">${esc(p.base_url)} · credential: ${p.api_key_env ? `env <code>${esc(p.api_key_env)}</code>` : (p.api_key_set ? "API key set (hidden)" : "none")}</div>
       <div class="meta">${health}</div>
-      <div class="meta">keys via aliases (read-only): ${keys.length ? keys.join(", ") : "none"} — edit grants on Keys &amp; Aliases</div>
+      <div class="meta">keys with grants on this provider (read-only): ${affected.length ? affected.join(", ") : "none"} — edit grants on Keys</div>
     </div>`;
-  }).join("") || `<div class="explain">No providers yet — "+ Add provider" stages your first upstream.</div>`;
+  }).join("") || `<div class="explain">No providers yet — "+ Add provider" adds your first upstream.</div>`;
 }
 
 // ---------- dashboard ----------
@@ -472,7 +447,7 @@ function renderDashboard() {
   const entries = state.log.filter(e =>
     state.filter === "all" || (state.filter === "compressed" ? e.compressed : e.status >= 400));
   $("log-body").innerHTML = entries.slice(-50).reverse().map(e =>
-    `<tr class="${e.status >= 400 ? "error" : ""}"><td>${new Date(e.ts * 1000).toLocaleTimeString()}</td><td>${esc(e.key_name)}</td><td>${esc(e.alias)}</td><td>${esc(e.resolved)}</td><td>${e.status}</td><td>${Math.round(e.latency_ms)}ms</td><td>${e.tokens_in}/${e.tokens_out}</td><td>${e.compressed ? `▼ saved ${e.tokens_saved}` : "—"}</td></tr>`).join("")
+    `<tr class="${e.status >= 400 ? "error" : ""}"><td>${new Date(e.ts * 1000).toLocaleTimeString()}</td><td>${esc(e.key_name)}</td><td>${esc(e.model)}</td><td>${esc(e.resolved)}</td><td>${e.status}</td><td>${Math.round(e.latency_ms)}ms</td><td>${e.tokens_in}/${e.tokens_out}</td><td>${e.compressed ? `▼ saved ${e.tokens_saved}` : "—"}</td></tr>`).join("")
     || `<tr><td colspan="8" class="explain">No requests yet.</td></tr>`;
   const cfg = state.saved || {};
   const total = state.log.length, err = state.log.filter(e => e.status >= 400).length;
@@ -483,10 +458,10 @@ function renderDashboard() {
   $("kpis").innerHTML = [
     [total, "requests (buffer)"], [err, "errors"], [p(0.5), "latency p50"], [p(0.95), "latency p95"],
     [tokIn, "tokens in"], [tokOut, "tokens out"], [saved, "tokens saved"], [comp, "compressed"],
-    [Object.keys(cfg.aliases || {}).length, "aliases"], [(cfg.keys || []).length, "keys"],
+    [(cfg.keys || []).length, "keys"], [(cfg.providers || []).length, "providers"],
   ].map(([v, l]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
   $("rail-keys").innerHTML = (cfg.keys || []).map(k =>
-    `<span class="item">● ${esc(k.name || k.api_key_env)} <span style="color:var(--muted)">→ ${(k.aliases || []).slice(0, 3).join(", ")}</span></span>`).join("") || `<span class="item" style="color:var(--muted)">no keys</span>`;
+    `<span class="item">● ${esc(k.name || k.api_key_env)} <span style="color:var(--muted)">→ ${(k.grants || []).slice(0, 3).map(g => esc(g.provider)).join(", ")}</span></span>`).join("") || `<span class="item" style="color:var(--muted)">no keys</span>`;
   const h = state.health;
   $("rail-providers").innerHTML = (cfg.providers || []).map(p => {
     const info = h && h.providers.find(x => x.name === p.name);
@@ -540,15 +515,16 @@ function showGeneratedModal(gen) {
 
 // ---------- staged forms (labelled inputs; Escape cancels, Enter submits) ----------
 function stageForm(hostId, fields, hint, onSubmit) {
-  document.querySelectorAll(".stage-form").forEach(f => { if (f.parentElement !== $(hostId)) f.parentElement.innerHTML = ""; }); // one form at a time (ids must stay unique)
-  const host = $(hostId);
+  const host = typeof hostId === "string" ? $(hostId) : hostId;
+  document.querySelectorAll(".stage-form").forEach(f => { if (f.parentElement !== host) f.parentElement.innerHTML = ""; }); // one form at a time (ids must stay unique)
+  const sfx = "g" + (++state.formSeq);  // unique ids per form instance (grant forms can repeat per key)
   host.innerHTML = `<form class="stage-form" role="group" aria-label="${esc(fields[0].name)} form">
-    ${fields.map(f => `<div class="field"><label for="sf-${esc(f.id)}">${esc(f.label)}</label>${f.options
-      ? `<select id="sf-${esc(f.id)}" name="${esc(f.id)}">${f.options.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`
-      : `<input id="sf-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off"${f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : ""}${f.list ? ` list="sfl-${esc(f.id)}"` : ""}>`}</div>`).join("")}
-    ${fields.filter(f => f.list).map(f => `<datalist id="sfl-${esc(f.id)}">${f.list.map(o => `<option value="${esc(o)}">`).join("")}</datalist>`).join("")}
-    ${(fields.extra || []).map(c => `<div class="field" style="flex:0"><label for="sf-${esc(c.id)}" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sf-${esc(c.id)}" name="${esc(c.id)}"> ${esc(c.label)}</label></div>`).join("")}
-    <div class="field" style="flex:0"><button class="act primary" type="submit">Stage</button>
+    ${fields.map(f => `<div class="field"><label for="sf-${sfx}-${esc(f.id)}">${esc(f.label)}</label>${f.options
+      ? `<select id="sf-${sfx}-${esc(f.id)}" name="${esc(f.id)}">${f.options.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`
+      : `<input id="sf-${sfx}-${esc(f.id)}" name="${esc(f.id)}" type="text" autocomplete="off"${f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : ""}${f.list ? ` list="sfl-${sfx}-${esc(f.id)}"` : ""}>`}</div>`).join("")}
+    ${fields.filter(f => f.list).map(f => `<datalist id="sfl-${sfx}-${esc(f.id)}">${f.list.map(o => `<option value="${esc(o)}">`).join("")}</datalist>`).join("")}
+    ${(fields.extra || []).map(c => `<div class="field" style="flex:0"><label for="sf-${sfx}-${esc(c.id)}" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sf-${sfx}-${esc(c.id)}" name="${esc(c.id)}"> ${esc(c.label)}</label></div>`).join("")}
+    <div class="field" style="flex:0"><button class="act primary" type="submit">Save</button>
     <button class="act" type="button" data-cancel>Cancel</button></div>
     ${hint ? `<div class="hintline">${esc(hint)}</div>` : ""}
   </form>`;
@@ -563,15 +539,65 @@ function stageForm(hostId, fields, hint, onSubmit) {
     // (with entered values) open and surface a visible error instead of
     // silently discarding what the user typed.
     let err = null;
-    try { err = onSubmit(values); } catch (ex) { err = "Invalid input — nothing staged."; }
+    try { err = onSubmit(values); } catch (ex) { err = "Invalid input — not saved."; }
     if (err) {
       let el = form.querySelector(".form-err");
       if (!el) { el = document.createElement("div"); el.className = "form-err"; el.setAttribute("role", "alert"); form.appendChild(el); }
-      el.textContent = typeof err === "string" ? err : "Invalid input — nothing staged.";
+      el.textContent = typeof err === "string" ? err : "Invalid input — not saved.";
       form.querySelector("input, select").focus();
       return;
     }
     host.innerHTML = "";
+  };
+}
+
+// ---------- grants form (one row per provider, saved in one submit) ----------
+function grantsForm(host, keyName) {
+  const sfx = "g" + (++state.formSeq);
+  const k = working().keys.find(k => (k.name || k.api_key_env) === keyName);
+  const current = (k && k.grants) || [];
+  const rows = (working().providers || []).map(p => {
+    const g = current.find(g => g.provider === p.name);
+    return `<div class="grant-row">
+      <span class="grant-provider">${esc(p.name)} <span style="color:var(--muted)">· ${esc(p.type)}</span></span>
+      <label class="sr-only" for="sf-${sfx}-${esc(p.name)}">Models on ${esc(p.name)}</label>
+      <input id="sf-${sfx}-${esc(p.name)}" name="${esc(p.name)}" type="text" autocomplete="off"
+        placeholder="models (comma-separated), or * for all — empty = no access"
+        value="${g ? esc((g.models || []).join(", ")) : ""}">
+    </div>`;
+  }).join("");
+  host.innerHTML = `<form class="stage-form grants-form" role="group" aria-label="Provider grants for ${esc(keyName)}">
+    ${rows}
+    <div class="field" style="flex:0"><button class="act primary" type="submit">Save</button>
+    <button class="act" type="button" data-cancel>Cancel</button></div>
+    <div class="hintline">Clients of ${esc(keyName)} may request exactly these upstream model names. Enter <code>*</code> alone to allow every model that provider serves. Empty row = no access to that provider.</div>
+  </form>`;
+  const form = host.querySelector("form");
+  form.querySelector("input").focus();
+  form.onkeydown = (e) => { if (e.key === "Escape") host.innerHTML = ""; };
+  form.querySelector("[data-cancel]").onclick = () => { host.innerHTML = ""; };
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const values = Object.fromEntries(new FormData(form).entries());
+    const grants = [];
+    for (const p of (working().providers || [])) {
+      const models = (values[p.name] || "").split(",").map(s => s.trim()).filter(Boolean);
+      if (models.length) grants.push({provider: p.name, models: [...new Set(models)]});
+    }
+    if (!grants.length) {
+      const m = "a key needs at least one grant — give at least one provider some models";
+      announce(m);
+      let el = form.querySelector(".form-err");
+      if (!el) { el = document.createElement("div"); el.className = "form-err"; el.setAttribute("role", "alert"); form.appendChild(el); }
+      el.textContent = m;
+      form.querySelector("input").focus();
+      return;
+    }
+    if (!k) { announce("key not found"); return; }
+    k.grants = grants;
+    host.innerHTML = "";
+    renderKeys();
+    announceStage(`pending: grants for ${keyName} — ${grants.map(g => g.provider).join(", ")}`);
   };
 }
 
@@ -581,7 +607,7 @@ document.addEventListener("click", async (e) => {
   const w = working;
 
   // Dead-session guard: config never loaded (unauthenticated or failed boot)
-  // -> no staging actions are meaningful. Show the key gate instead of a form
+  // -> no edit actions are meaningful. Show the key gate instead of a form
   // that would silently fail against state.saved === null.
   if (state.saved === null && !t.closest("#key-gate")) {
     $("key-gate").hidden = false;
@@ -598,24 +624,6 @@ document.addEventListener("click", async (e) => {
     }
     return;
   }
-  if (t.id === "add-alias") {
-    const cfg = state.saved;
-    const providers = (cfg.providers || []).map(p => p.name);
-    stageForm("alias-form-host", [
-      {id: "name", name: "alias", label: "Alias name"},
-      {id: "target", name: "target", label: "Target provider:model", placeholder: "openrouter:gpt-4o-mini", list: providers.map(p => p + ":")},
-    ], "Pick a provider prefix, then type the model after the colon — providers: " + (providers.join(", ") || "none"), (v) => {
-      const name = (v.name || "").trim(), target = (v.target || "").trim();
-      if (!name || !target.includes(":")) { const m = "alias needs a name and a 'provider:model' target"; announce(m); return m; }
-      working().aliases = working().aliases || {};
-      working().aliases[name] = target;
-      renderAliases(); announceStage(`staged: alias ${name} → ${target}`);
-    });
-    return;
-  }
-  const delAlias = t.getAttribute("data-delalias");
-  if (delAlias) { delete working().aliases[delAlias]; renderAliases(); announceStage(`staged: delete alias ${delAlias}`); return; }
-
   if (t.id === "add-key") {
     stageForm("key-form-host", [
       {id: "name", name: "key", label: "Key name (display only)"},
@@ -623,67 +631,54 @@ document.addEventListener("click", async (e) => {
       const name = (v.name || "").trim();
       if (!name) { const m = "key needs a name"; announce(m); return m; }
       working().keys = working().keys || [];
-      working().keys.push({name, aliases: []});
-      renderKeys(); announceStage(`staged: issue key ${name} — grant at least one alias`);
+      working().keys.push({name, grants: []});
+      renderKeys(); announceStage(`pending: issue key ${name} — set its grants`);
     });
     return;
   }
   const delKey = t.getAttribute("data-delkey");
-  if (delKey) { working().keys = working().keys.filter(k => (k.name || k.api_key_env) !== delKey); renderKeys(); announceStage(`staged: revoke key ${delKey}`); return; }
+  if (delKey) { working().keys = working().keys.filter(k => (k.name || k.api_key_env) !== delKey); renderKeys(); announceStage(`pending: revoke key ${delKey}`); return; }
 
-  const revoke = t.getAttribute("data-revoke");
-  if (revoke) {
-    const alias = t.getAttribute("data-alias");
-    const k = working().keys.find(k => (k.name || k.api_key_env) === revoke);
-    if (k) k.aliases = k.aliases.filter(a => a !== alias);
-    renderKeys(); announceStage(`staged: revoke alias ${alias} from ${revoke}`);
+  const delGrant = t.getAttribute("data-delgrant");
+  if (delGrant) {
+    const gi = parseInt(t.getAttribute("data-gi"), 10);
+    const k = working().keys.find(k => (k.name || k.api_key_env) === delGrant);
+    if (k && k.grants && gi >= 0 && gi < k.grants.length) {
+      const removed = k.grants.splice(gi, 1)[0];
+      renderKeys(); announceStage(`pending: remove grant ${removed.provider} from ${delGrant}`);
+    }
     return;
   }
-  const grant = t.getAttribute("data-grant");
-  if (grant) {
-    const avail = Object.keys(state.saved.aliases || {}).filter(a => {
-      const k = working().keys.find(k => (k.name || k.api_key_env) === grant);
-      return k && !k.aliases.includes(a);
-    });
-    if (!avail.length) { announce("no ungranted aliases left"); return; }
-    stageForm("key-form-host", [
-      {id: "alias", name: "grant", label: `Grant alias to ${grant}`, options: avail},
-    ], "One click to stage the grant.", (v) => {
-      const a = v.alias;
-      working().keys.find(k => (k.name || k.api_key_env) === grant).aliases.push(a);
-      renderKeys(); announceStage(`staged: grant alias ${a} to ${grant}`);
-    });
+  const addGrant = t.getAttribute("data-addgrant");
+  if (addGrant) {
+    const host = document.querySelector(`[data-granthost="${CSS.escape(addGrant)}"]`);
+    if (!(working().providers || []).length) { announce("add a provider first — grants target providers"); return; }
+    if (host && host.querySelector("form")) { announce("grant form already open for " + addGrant); return; }
+    grantsForm(host, addGrant);
     return;
   }
 
   if (t.id === "discard") {
-    state.staged = null; renderAliases(); renderKeys(); renderDiff(); announce("staging discarded");
-    return;
-  }
-  if (t.id === "validate") {
-    if (!state.staged) { bannerError("nothing staged to validate"); return; }
-    const r = await api("/admin/config/validate", {method: "POST", body: JSON.stringify(state.staged)});
-    const b = await readJson(r);
-    if (b._parse_error) { bannerError(`validation endpoint returned HTTP ${b._status} — server error, staging preserved`); announce("validate failed: HTTP " + b._status); return; }
-    if (b.valid) { $("stage-msg").textContent = "✓ valid — ready to Apply"; announce("validation passed"); }
-    else { bannerError(b.errors.join("; ")); announce("validation failed"); }
+    state.staged = null; renderKeys(); renderDiff(); announce("changes discarded");
     return;
   }
   if (t.id === "apply") {
-    if (!state.staged) { bannerError("nothing staged to apply — stage a change first"); return; }
+    if (!state.staged) { bannerError("nothing to apply — make a change first"); return; }
+    $("apply").disabled = true;  // guard against double-submit while the PUT is in flight
+    $("stage-msg").textContent = "…validating & applying";
     const r = await api("/admin/config", {method: "PUT", body: JSON.stringify(state.staged)});
     const b = await readJson(r);
-    if (b._parse_error) { bannerError(`apply returned HTTP ${b._status} — server error, staging preserved`); announce("apply failed: HTTP " + b._status); return; }
+    if (b._parse_error) { bannerError(`apply returned HTTP ${b._status} — server error, changes preserved`); announce("apply failed: HTTP " + b._status); return; }
     if (!r.ok) {
-      bannerError("server rejected: " + (b.detail && b.detail.errors ? b.detail.errors.join("; ") : JSON.stringify(b.detail)));
-      announce("apply rejected — staging preserved");
+      bannerError("validation rejected the change: " + (b.detail && b.detail.errors ? b.detail.errors.join("; ") : JSON.stringify(b.detail)));
+      announce("apply rejected — changes preserved");
       return;
     }
     state.migrated = new Set(b.migrated_keys || []);
     // re-fetch and re-render from the server (spec §3.2): never merge PUT into local state
     await loadConfig();
     showGeneratedModal(b.generated);
-    // visible success feedback: show it IN the sticky staging bar itself —
+    // visible success feedback: show it IN the sticky action bar itself —
     // exactly where the Apply button the user just clicked lives (§3.2)
     const bar = $("stage-bar");
     bar.classList.remove("err");
@@ -691,10 +686,10 @@ document.addEventListener("click", async (e) => {
     bar.removeAttribute("role"); bar.setAttribute("role", "status");
     bar.hidden = false;
     $("stage-msg").textContent = `✓ applied ${state.migrated.size ? "(incl. migrated keys) " : ""}— config is live`;
-    $("apply").disabled = true; $("validate").disabled = true; $("discard").hidden = true; $("validate").hidden = true;
+    $("apply").disabled = true; $("discard").hidden = true;
     setTimeout(() => {
-      $("discard").hidden = false; $("validate").hidden = false;
-      renderDiff(); // hides the bar if nothing new is staged
+      $("discard").hidden = false;
+      renderDiff(); // hides the bar if nothing new is pending
     }, 6000);
     announce("applied — in-flight requests may still complete");
     return;
@@ -728,10 +723,13 @@ document.addEventListener("click", async (e) => {
         if (env) fields.api_key_env = env;       // absent on edit = keep existing server-side
       }
       if (origName) {
-        // rename re-points aliases and keys follow by name indirection
+        // rename re-points key grants
         if (origName !== name) {
-          working().aliases = Object.fromEntries(Object.entries(working().aliases || {})
-            .map(([a, tgt]) => [a, tgt.startsWith(origName + ":") ? name + ":" + tgt.slice(origName.length + 1) : tgt]));
+          for (const k of working().keys || []) {
+            for (const g of k.grants || []) {
+              if (g.provider === origName) g.provider = name;
+            }
+          }
           const idx = providers.findIndex(x => x.name === origName);
           const old = providers[idx];
           const fresh = {name, type: fields.type, base_url: fields.base_url};
@@ -754,32 +752,33 @@ document.addEventListener("click", async (e) => {
             if (!env) delete tgt.api_key_env;
           }
         }
-        renderProviders(); announceStage(`staged: edit provider ${name}${stripCred ? " (credential removed)" : ""}`);
+        renderProviders(); announceStage(`pending: edit provider ${name}${stripCred ? " (credential removed)" : ""}`);
       } else {
         if (providers.some(x => x.name === name)) { const m = `provider '${name}' already exists — pick another name`; announce(m); return m; }
         const fresh = {name, type: v.type, base_url: base};
         if (fields.api_key) fresh.api_key = fields.api_key;
         if (fields.api_key_env) fresh.api_key_env = fields.api_key_env;
         providers.push(fresh);
-        renderProviders(); announceStage(`staged: add provider ${name}`);
+        renderProviders(); announceStage(`pending: add provider ${name}`);
       }
     });
     // prefill for edit (api_key never prefilled — write-only)
     const f = $("provider-form-host").querySelector("form");
     if (f) {
-      if (p.name) { f.querySelector("#sf-name").value = p.name; }
-      f.querySelector("#sf-type").value = p.type;
-      f.querySelector("#sf-base_url").value = p.base_url || "";
-      f.querySelector("#sf-api_key_env").value = p.api_key_env || "";
+      const byName = (n) => f.querySelector(`[name="${n}"]`);
+      if (p.name) { byName("name").value = p.name; }
+      byName("type").value = p.type;
+      byName("base_url").value = p.base_url || "";
+      byName("api_key_env").value = p.api_key_env || "";
     }
     return;
   }
   const delProvider = t.getAttribute("data-delprovider");
   if (delProvider) {
-    const affected = Object.entries(state.saved.aliases || {}).filter(([, t2]) => t2.startsWith(delProvider + ":")).map(([a]) => a);
-    if (affected.length && !confirm(`Remove provider '${delProvider}'? ${affected.length} alias${affected.length === 1 ? "" : "es"} point at it (${affected.join(", ")}) — validation will reject dangling aliases.`)) return;
+    const affected = (state.saved.keys || []).filter(k => (k.grants || []).some(g => g.provider === delProvider)).map(k => k.name || k.api_key_env);
+    if (affected.length && !confirm(`Remove provider '${delProvider}'? ${affected.length} key${affected.length === 1 ? "" : "s"} grant models on it (${affected.join(", ")}) — validation will reject dangling grants.`)) return;
     working().providers = (working().providers || []).filter(p => p.name !== delProvider);
-    renderProviders(); announceStage(`staged: remove provider ${delProvider}${affected.length ? ` (${affected.length} alias(es) will dangle)` : ""}`);
+    renderProviders(); announceStage(`pending: remove provider ${delProvider}${affected.length ? ` (${affected.length} key(s) lose grants)` : ""}`);
     return;
   }
 

@@ -9,10 +9,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from adapters import AdapterError, BaseAdapter
-from adapters.openai_compat import OpenAICompatAdapter
-from adapters.anthropic import AnthropicAdapter
-from adapters.gemini import GeminiAdapter
+from adapters import AdapterError, BaseAdapter, get_adapter
 from config import ModelNotGranted, Settings
 from schemas import ChatCompletionRequest
 from .request_compression import compress_request_messages
@@ -20,8 +17,6 @@ from .request_compression import compress_request_messages
 logger = logging.getLogger("headrouter.chat")
 
 router = APIRouter()
-
-_ADAPTER_CACHE: dict[tuple, BaseAdapter] = {}
 
 
 def _key_display_name(settings: Settings, gateway_key: str | None) -> str:
@@ -31,37 +26,15 @@ def _key_display_name(settings: Settings, gateway_key: str | None) -> str:
     return "admin" if gateway_key else "-"
 
 
-def _log_request(state, settings, gateway_key, alias, route, status, latency_s, **kw):
+def _log_request(state, settings, gateway_key, model, route, status, latency_s, **kw):
     state.request_log.record(
         key_name=_key_display_name(settings, gateway_key),
-        alias=alias,
+        model=model,
         resolved=f"{route.provider}:{route.model}",
         status=status,
         latency_ms=latency_s * 1000,
         **kw,
     )
-
-
-def get_adapter(provider: str, settings: Settings) -> BaseAdapter:
-    info = settings.endpoint(provider)
-    # Cache keyed by the endpoint identity, not just the name: a config apply
-    # that changes base_url/credentials must produce a fresh adapter.
-    cache_key = (provider, info.base_url, info.api_key, info.type)
-    cached = _ADAPTER_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    if info.is_openai_compat:
-        adapter: BaseAdapter = OpenAICompatAdapter(info.base_url, info.api_key)
-    elif info.type == "anthropic":
-        adapter = AnthropicAdapter(info.base_url, info.api_key)
-    elif info.type == "gemini":
-        adapter = GeminiAdapter(info.base_url, info.api_key)
-    else:  # pragma: no cover - guarded by settings.endpoint
-        raise KeyError(f"unknown provider type: {info.type}")
-    if len(_ADAPTER_CACHE) > 64:  # bound after hot reloads
-        _ADAPTER_CACHE.clear()
-    _ADAPTER_CACHE[cache_key] = adapter
-    return adapter
 
 
 def _error(status: int, message: str, err_type: str, code: str | None = None) -> JSONResponse:
@@ -108,7 +81,7 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
         )
 
     try:
-        adapter = get_adapter(route.provider, settings)
+        adapter = get_adapter(route.provider, settings, state.adapter_cache)
     except KeyError:
         logger.warning(
             "chat routing error method=%s path=%s provider=%s status=404 code=provider_not_found",
@@ -127,15 +100,8 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     started = time.perf_counter()
 
     if payload.stream:
-        return StreamingResponse(
-            adapter.stream(state.http_client, body),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "X-Compression-Applied": str(compression_result.applied).lower(),
-            },
-        )
+        return await _stream_response(state, settings, request, adapter, body, route,
+                                      gateway_key, payload.model, compression_result, started)
 
     try:
         result = await adapter.complete(state.http_client, body)
@@ -177,3 +143,71 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
 
     headers = {"X-Compression-Applied": str(compression_result.applied).lower()}
     return JSONResponse(result, headers=headers)
+
+
+async def _stream_response(state, settings, request, adapter, body, route,
+                           gateway_key, model, compression_result, started):
+    """Pre-flight the upstream stream so connection/status failures map to a
+    proper JSON error (and get logged/metered) instead of a truncated 200 SSE."""
+    gen = adapter.stream(state.http_client, body)
+    try:
+        first = await gen.__anext__()
+    except StopAsyncIteration:
+        await gen.aclose()
+        state.metrics.observe_request(route.provider, 502, time.perf_counter() - started)
+        return _error(502, "Upstream returned an empty stream.", "upstream_error")
+    except AdapterError as exc:
+        await gen.aclose()
+        state.metrics.observe_request(route.provider, exc.status_code, time.perf_counter() - started)
+        logger.warning(
+            "chat upstream error method=%s path=%s provider=%s model=%s status=%s body=%r",
+            request.method, request.url.path, route.provider, route.model,
+            exc.status_code, exc.message,
+        )
+        return _error(exc.status_code, exc.message, "upstream_error")
+    except Exception as exc:
+        await gen.aclose()
+        state.metrics.observe_request(route.provider, 502, time.perf_counter() - started)
+        logger.exception(
+            "chat request failed method=%s path=%s provider=%s model=%s status=502 error=%s",
+            request.method, request.url.path, route.provider, route.model, exc,
+        )
+        return _error(502, f"Upstream request failed: {exc}", "upstream_error")
+
+    async def stream_body():
+        status = 200
+        try:
+            yield first
+            async for chunk in gen:
+                yield chunk
+        except AdapterError as exc:
+            status = exc.status_code
+            logger.warning(
+                "chat stream interrupted by upstream error method=%s path=%s provider=%s model=%s status=%s",
+                request.method, request.url.path, route.provider, route.model, exc.status_code,
+            )
+        except Exception:
+            status = 502
+            logger.exception(
+                "chat stream failed method=%s path=%s provider=%s model=%s status=502",
+                request.method, request.url.path, route.provider, route.model,
+            )
+        finally:
+            await gen.aclose()
+            latency = time.perf_counter() - started
+            state.metrics.observe_request(route.provider, status, latency)
+            _log_request(
+                state, settings, gateway_key, model, route, status, latency,
+                compressed=compression_result.applied,
+                tokens_saved=getattr(compression_result, "tokens_saved", 0),
+            )
+
+    return StreamingResponse(
+        stream_body(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Compression-Applied": str(compression_result.applied).lower(),
+        },
+    )

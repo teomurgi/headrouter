@@ -24,23 +24,22 @@
       "api_key_env": "GEMINI_API_KEY"
     }
   ],
-  "aliases": {
-    "fast": "my-openai:gpt-4o-mini",
-    "smart": "my-openai:gpt-4o",
-    "sonnet": "work-claude:claude-sonnet-4",
-    "local": "local:llama3.1",
-    "gem": "google:gemini-1.5-pro"
-  },
   "keys": [
     {
       "name": "team-a",
       "api_key_env": "KEY_TEAM_A",
-      "aliases": ["fast", "local"]
+      "grants": [
+        {"provider": "my-openai", "models": ["gpt-4o-mini"]},
+        {"provider": "local", "models": ["llama3.1"]}
+      ]
     },
     {
       "name": "team-b",
       "api_key_env": "KEY_TEAM_B",
-      "aliases": ["sonnet", "fast"]
+      "grants": [
+        {"provider": "work-claude", "models": ["claude-sonnet-4"]},
+        {"provider": "my-openai", "models": ["gpt-4o-mini"]}
+      ]
     }
   ]
 }

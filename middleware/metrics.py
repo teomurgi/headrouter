@@ -7,6 +7,11 @@ import time
 from dataclasses import dataclass, field
 
 
+def _escape_label(value: str) -> str:
+    """Escape a Prometheus label value (backslash, double quote, newline)."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 @dataclass
 class Metrics:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -61,7 +66,10 @@ class Metrics:
             "# TYPE gateway_requests_total counter",
         ]
         for (provider, status), n in sorted(self.requests.items()):
-            lines.append(f'gateway_requests_total{{provider="{provider}",status="{status}"}} {n}')
+            lines.append(
+                f'gateway_requests_total{{provider="{_escape_label(provider)}",'
+                f'status="{_escape_label(status)}"}} {n}'
+            )
         lines += [
             "# HELP gateway_request_latency_seconds Average request latency.",
             "# TYPE gateway_request_latency_seconds gauge",

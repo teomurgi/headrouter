@@ -18,7 +18,7 @@ class LogEntry:
     seq: int
     ts: float
     key_name: str
-    alias: str
+    model: str
     resolved: str
     status: int
     latency_ms: float
@@ -37,7 +37,7 @@ class RequestLog:
     def record(
         self,
         key_name: str,
-        alias: str,
+        model: str,
         resolved: str,
         status: int,
         latency_ms: float,
@@ -52,7 +52,7 @@ class RequestLog:
                 seq=self._seq,
                 ts=time.time(),
                 key_name=key_name,
-                alias=alias,
+                model=model,
                 resolved=resolved,
                 status=status,
                 latency_ms=round(latency_ms, 1),

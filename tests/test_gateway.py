@@ -62,7 +62,8 @@ def test_validation_error_is_logged_without_request_content(client, caplog):
 
 
 def test_unknown_model_404(settings, captured):
-    settings.default_route = None
+    from dataclasses import replace
+    settings = replace(settings, default_route=None)
     app = create_app(
         settings=settings,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler(captured))),

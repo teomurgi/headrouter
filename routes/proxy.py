@@ -5,8 +5,8 @@ is forwarded verbatim to the resolved provider — same method, path, query,
 body and response (including SSE streaming) — with only the base URL and
 authentication rewritten. The target provider is resolved from, in order:
 
-1. the `model` field of a JSON request body,
-2. the authenticated gateway key's provider binding,
+1. the `model` field of a JSON request body (closed against the key's grants),
+2. the authenticated gateway key's provider binding (single-provider keys only),
 3. the default route.
 """
 
@@ -67,7 +67,10 @@ def _resolve_route(request: Request, body: bytes, settings: Settings):
         except Exception:
             pass
     binding = settings.key_binding(gateway_key)
-    if binding is not None:
+    if binding is not None and binding.provider:
+        # Single-provider bindings (legacy grants, single-grant v3 keys) can
+        # still route model-less requests; multi-provider keys cannot — they
+        # need a 'model' in the body to pick a provider.
         return binding.provider, None
     if settings.default_route is not None:
         return settings.default_route.provider, None
@@ -130,12 +133,16 @@ async def proxy_all(path: str, request: Request):
     # A body may accompany any method (DELETE with a body is legal); detect
     # its presence via headers rather than assuming method semantics.
     content_length = request.headers.get("content-length")
+    try:
+        content_length_int = int(content_length) if content_length not in (None, "") else None
+    except ValueError:
+        content_length_int = None  # malformed header: treat as unbounded
     has_body = (
-        (content_length is not None and content_length != "" and int(content_length) > 0)
+        (content_length_int is not None and content_length_int > 0)
         or "transfer-encoding" in request.headers
     )
     json_content = "json" in (request.headers.get("content-type") or "").lower()
-    bounded = content_length is not None and int(content_length) <= MAX_PEEK_BYTES
+    bounded = content_length_int is not None and content_length_int <= MAX_PEEK_BYTES
     messages_endpoint = request.method == "POST" and path.rstrip("/") == "v1/messages"
 
     body = b""

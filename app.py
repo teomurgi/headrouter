@@ -34,7 +34,7 @@ def create_app(
     settings = settings or Settings.from_env()
     owns_client = http_client is None
     if config_store is None and settings._providers_source:
-        config_store = ConfigStore(settings._providers_source, base_settings=replace(settings, custom_providers={}, key_bindings={}, aliases={}))
+        config_store = ConfigStore(settings._providers_source, base_settings=replace(settings, custom_providers={}, key_bindings={}))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -66,9 +66,12 @@ def create_app(
     )
     app.state.metrics = Metrics()
     app.state.request_log = RequestLog()
+    app.state.adapter_cache = {}
 
-    if settings.effective_api_keys():
-        app.add_middleware(AuthMiddleware, api_keys=None, app_ref=app)
+    # Always registered: dispatch skips auth when the effective key set is
+    # empty, and reads live settings so keys added later via Apply still
+    # take effect without a restart.
+    app.add_middleware(AuthMiddleware, api_keys=None, app_ref=app)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):

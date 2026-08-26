@@ -18,7 +18,7 @@ python -m venv .venv && .venv/bin/pip install -e .
 
 cp .env.example .env   # then edit: provider credentials, GATEWAY_API_KEYS, ...
 
-.venv/bin/uvicorn app:app --port 8000
+c
 ```
 
 A `.env` file in the working directory (or the repo root) is loaded automatically at startup — no need to `export` variables manually. Real environment variables always take precedence; `.env` only fills in what isn't already set. Set `GATEWAY_ENV_FILE` to load a different file.
@@ -61,9 +61,9 @@ Resolution is **closed** for key-bound traffic: a key can reach exactly the mode
 
 Point at it with `GATEWAY_PROVIDERS_FILE=providers.json` (or inline via `GATEWAY_PROVIDERS`).
 
-- **providers** — `name`, `type` (`openai`, `openrouter`, `ollama`, `openai-compat`, `anthropic`, `gemini`), `base_url`, and a credential: either `api_key` (a plain value, accepted **write-only** via the admin API — stored in this file, never returned by any GET) or `api_key_env` (the *name* of an environment variable holding the key). If a provider config file contains secrets, protect it: `chmod 600 providers.json`.
+- **providers** — `name`, `type` (`openai`, `openrouter`, `ollama`, `openai-compat`, `anthropic`, `gemini`), `base_url`, and `api_key_env` (the *name* of an environment variable holding the key; the value never lives in the file). Inline `api_key` values are accepted on disk for local use but are **rejected by the admin API** (see below).
 - **aliases** — `name -> "provider:model"`. Each alias's provider must exist.
-- **keys** — `name` (display only), credential via `api_key_env` or `api_key`, and a non-empty `aliases` grant list; granted names must exist in `aliases`. Duplicate key values are rejected. Keys in this file are always **scoped** — admin access comes solely from `GATEWAY_API_KEYS` (env), never from a field in this file (`admin` is rejected).
+- **keys** — `name` (display only), credential via `api_key_env` or `api_key`, and a non-empty `aliases` grant list; granted names must exist in `aliases`. Duplicate key values are rejected.
 
 **Legacy configs migrate automatically**: the old shape (`keys[].provider` + per-key `routes`) is accepted at startup and converted in-memory to explicit per-key grants — per-key routes become global aliases granted to that key; routeless keys keep provider-scoped access, marked as *migrated* in the admin UI for review/pruning. Every Apply writes the v2 shape back to disk.
 
@@ -73,11 +73,11 @@ Without a providers file, `GATEWAY_ROUTES="alias=provider:model,..."` and `GATEW
 
 ## Admin UI & API (`/admin`)
 
-Open `http://localhost:8000/admin`. The page itself is public (static HTML); every API call below requires a **gateway key** (`Authorization: Bearer ...`). It inherits gateway auth — there is no separate login.
+Open `c`. The page itself is public (static HTML); every API call below requires a **gateway key** (`Authorization: Bearer ...`). It inherits gateway auth — there is no separate login.
 
 - **Dashboard** — KPI row (requests, latency p50/p95, tokens in/out, compression savings), live request stream (cursor-polled, filter by compressed/errors, pausable), keys/providers rail.
 - **Keys & Aliases** — chip-card editing with a sticky stage → validate → apply bar. Staged changes show a client-computed diff; Validate surfaces server errors verbatim; Apply is re-validated server-side and, on rejection, your staging is preserved.
-- **Providers** — editable cards: "+ Add provider" (type dropdown with known-provider presets, base URL, key env-var name — only the variable name is stored, the value lives in the server's environment), ✎ edit in place (renaming re-points aliases automatically), ✕ remove (confirms blast radius). Reachability with blast radius ("unreachable — 2 aliases affected") and bound keys shown read-only. Provider changes stage through the same validate → apply bar.
+- **Providers** — cards with type, base URL, key env-var name, reachability with blast radius ("unreachable — 2 aliases affected"), and bound keys.
 
 REST surface (consumed by the page, usable directly):
 
@@ -128,7 +128,7 @@ REST surface (consumed by the page, usable directly):
 - Non-OpenAI providers get full format translation: messages, system prompts, tools / tool calls / tool results, streaming SSE — all converted to/from OpenAI wire format.
 - Upstream errors are propagated with their original status codes in an OpenAI-style error body.
 - `X-Compression-Applied: true|false` response header on Chat Completions and Anthropic Messages indicates whether compression reduced the request context.
-- Secrets never leave the server via the admin API: provider credentials are write-only (paste once, stored server-side, GET shows only "set / not set"), and only env-var *names* are echoed for the env-var path; generated key values are shown once at creation. Gateway *keys* are never accepted as raw values — env-var or generated only.
+- Secrets never travel through the admin surface: only env-var *names* are stored, sent, or displayed; generated key values are shown once at creation.
 
 ## Docker
 

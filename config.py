@@ -58,7 +58,7 @@ class ConfigError(ValueError):
 
 
 class ModelNotGranted(Exception):
-    """A bound key requested a model outside its granted aliases (INV-1)."""
+    """A bound key requested a model outside its grants (INV-1)."""
 
     def __init__(self, model: str, available: list[str]):
         self.model = model
@@ -118,19 +118,28 @@ def _parse_route(raw: str | None) -> Route | None:
 
 
 @dataclass(frozen=True)
-class KeyBinding:
-    """A downstream key entitled to a set of global aliases.
+class ModelGrant:
+    """One provider plus the set of its upstream models a key may use."""
 
-    `aliases` holds granted alias names (v2 shape). Legacy configs (v1:
-    provider + optional per-key routes) keep `provider` set and `aliases`
-    empty, which resolves with the old provider-scoped behavior.
+    provider: str
+    models: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class KeyBinding:
+    """A downstream key entitled to a set of provider-scoped model grants.
+
+    `grants` is the v3 shape: closed resolution (INV-1) — the key may request
+    exactly the granted upstream model names, routed to the granting provider.
+    Legacy configs keep `legacy_provider_grant` set with an empty `grants`,
+    which resolves with the old provider-scoped passthrough behavior.
     """
 
     api_key: str
     provider: str = ""
     routes: dict[str, str] = field(default_factory=dict)
     name: str = ""
-    aliases: frozenset[str] = frozenset()
+    grants: tuple[ModelGrant, ...] = ()
     legacy_provider_grant: str | None = None
 
 
@@ -232,11 +241,11 @@ def load_gateway_config(
 
 
 def validate_config(data: dict) -> list[str]:
-    """Validate a v2-shape config dict; return a list of error strings (empty = valid).
+    """Validate a v3-shape config dict; return a list of error strings (empty = valid).
 
-    The single validation implementation (INV rules §4): alias names must be
-    parseable and point at known providers; keys need non-empty alias sets of
-    known aliases; no duplicate key values.
+    The single validation implementation (INV rules §4): each key carries a
+    non-empty `grants` list of {provider, models}; every grant provider must be
+    known and every models list non-empty; no duplicate key values.
     """
     errors: list[str] = []
     try:
@@ -246,26 +255,6 @@ def validate_config(data: dict) -> list[str]:
         defs = {}
 
     known = set(defs) | KNOWN_PROVIDERS
-    aliases: dict[str, Route] = {}
-    raw_aliases = data.get("aliases", {})
-    if not isinstance(raw_aliases, dict):
-        errors.append("'aliases' must be an object of {name: 'provider:model'}")
-        raw_aliases = {}
-    for name, target in raw_aliases.items():
-        if not isinstance(target, str):
-            errors.append(
-                f"alias '{name}': expected 'provider:model' string, got {type(target).__name__}"
-            )
-            continue
-        route = _parse_route(target)
-        if route is None:
-            errors.append(f"alias '{name}': invalid target '{target}' (expected 'provider:model')")
-            continue
-        if route.provider not in known:
-            errors.append(f"alias '{name}': unknown provider '{route.provider}'")
-            continue
-        aliases[str(name)] = route
-
     seen_values: dict[str, str] = {}
     keys = data.get("keys", [])
     if not isinstance(keys, list):
@@ -281,13 +270,21 @@ def validate_config(data: dict) -> list[str]:
                 f"key '{name}': the 'admin' field is rejected — admin access comes from "
                 "GATEWAY_API_KEYS; remove the 'admin' field"
             )
-        granted = entry.get("aliases")
-        if not isinstance(granted, list) or not granted:
-            errors.append(f"key '{name}' needs at least one alias")
+        grants = entry.get("grants")
+        if not isinstance(grants, list) or not grants:
+            errors.append(f"key '{name}' needs at least one grant (provider + models)")
             continue
-        for alias in granted:
-            if str(alias) not in aliases:
-                errors.append(f"key '{name}' references unknown alias '{alias}'")
+        for j, grant in enumerate(grants):
+            if not isinstance(grant, dict):
+                errors.append(f"key '{name}' grant #{j} must be an object of provider + models")
+                continue
+            provider = str(grant.get("provider", "")).strip()
+            if provider not in known:
+                errors.append(f"key '{name}' grant #{j}: unknown provider '{provider}'")
+                continue
+            models = grant.get("models")
+            if not isinstance(models, list) or not [m for m in models if str(m).strip()]:
+                errors.append(f"key '{name}' grant #{j} ({provider}): needs at least one model")
         value = entry.get("api_key") or entry.get("api_key_env") or ""
         if value and value in seen_values:
             errors.append(f"duplicate api key value: '{value}' is used by '{seen_values[value]}' and '{name}'")
@@ -296,53 +293,122 @@ def validate_config(data: dict) -> list[str]:
     return errors
 
 
+def _parse_grants(entries, known: set[str]) -> tuple[ModelGrant, ...]:
+    """Parse a grants list into ModelGrants, merging per provider.
+
+    Assumes validate_config already passed; unknown providers / empty entries
+    are skipped defensively rather than re-raising.
+    """
+    merged: dict[str, set[str]] = {}
+    order: list[str] = []
+    for grant in entries or []:
+        if not isinstance(grant, dict):
+            continue
+        provider = str(grant.get("provider", "")).strip()
+        if not provider or provider not in known:
+            continue
+        models = {str(m).strip() for m in (grant.get("models") or []) if str(m).strip()}
+        if not models:
+            continue
+        if provider not in merged:
+            merged[provider] = set()
+            order.append(provider)
+        merged[provider].update(models)
+    return tuple(ModelGrant(provider=p, models=frozenset(merged[p])) for p in order)
+
+
 def load_config_v2(
     source: str | list | dict, env: dict[str, str] | None = None
-) -> tuple[dict[str, ProviderDef], dict[str, KeyBinding], dict[str, Route]]:
-    """Load the v2 config shape: providers + global aliases + per-key alias grants.
+) -> tuple[dict[str, ProviderDef], dict[str, KeyBinding]]:
+    """Load the config: providers + per-key provider/model grants.
 
-    Accepts the legacy v1 shape (keys[].provider + per-key routes) and migrates
-    it per INV-8: per-key routes become explicit global aliases granted to that
-    key; a key with no routes gets an explicit provider-scoped legacy grant.
+    Current shape (v3): ``keys[].grants = [{provider, models}]`` — closed
+    resolution (INV-1): a scoped key may request exactly the granted upstream
+    model names, each routed to its granting provider.
+
+    Accepts and migrates the two legacy shapes per INV-8:
+      - v2 (global ``aliases`` map + ``keys[].aliases``): each granted alias
+        resolves to its target provider:model and becomes an explicit grant,
+        merged per provider.
+      - v1 (``keys[].provider`` + per-key ``routes``): routes become grants on
+        the bound provider (both alias and upstream model names granted, so
+        existing clients keep working); a key with no routes gets an explicit
+        provider-scoped legacy passthrough grant.
+
     Raises ConfigError with all problems listed if validation fails.
     """
     env = os.environ if env is None else env
     data = _load_json(source)
     if not isinstance(data, dict):
-        raise ConfigError("v2 config must be an object with 'providers'/'aliases'/'keys'")
+        raise ConfigError("config must be an object with 'providers'/'keys'")
 
     defs = _parse_providers(data.get("providers", []), env)
     known = set(defs) | KNOWN_PROVIDERS
 
-    aliases: dict[str, Route] = {}
+    key_entries = data.get("keys", [])
+    if not isinstance(key_entries, list):
+        raise ConfigError("'keys' must be a list")
+
     bindings: dict[str, KeyBinding] = {}
 
-    if "aliases" in data:
-        for name, target in (data.get("aliases") or {}).items():
-            route = _parse_route(str(target))
-            if route is not None:
-                aliases[str(name)] = route
-        for i, entry in enumerate(data.get("keys", [])):
+    if any(isinstance(e, dict) and "grants" in e for e in key_entries):
+        # v3 shape: validate upfront so every problem is reported at once.
+        errors = validate_config(data)
+        if errors:
+            raise ConfigError("; ".join(errors))
+        for i, entry in enumerate(key_entries):
             if not isinstance(entry, dict):
                 raise ConfigError(f"key entry #{i} must be an object")
             name = str(entry.get("name", "") or "")
             api_key = _resolve_secret(entry, env, f"key entry #{i}")
-            granted = frozenset(str(a) for a in (entry.get("aliases") or []))
-            providers = {aliases[a].provider for a in granted if a in aliases}
-            provider = next(iter(providers)) if len(providers) == 1 else (entry.get("provider") or next(iter(providers), ""))
-            bindings[api_key] = KeyBinding(
-                api_key=api_key, provider=str(provider), name=name, aliases=granted
-            )
-        errors = [
-            e for e in validate_config(data)
-            if "api_key" not in e  # raw values may be absent here (env names); loader resolved them
-        ]
-        if errors:
-            raise ConfigError("; ".join(errors))
-        return defs, bindings, aliases
+            grants = _parse_grants(entry.get("grants"), known)
+            provider = grants[0].provider if len(grants) == 1 else ""
+            bindings[api_key] = KeyBinding(api_key=api_key, provider=provider, name=name, grants=grants)
+        return defs, bindings
 
-    # v1 → v2 migration (INV-8): synthesize explicit per-key grants.
-    key_entries = data.get("keys", [])
+    if "aliases" in data:
+        # v2 → v3 migration: each granted alias becomes its target
+        # provider:model as an explicit per-key grant, merged per provider.
+        raw_aliases = data.get("aliases")
+        if not isinstance(raw_aliases, dict):
+            raise ConfigError("'aliases' must be an object of {name: 'provider:model'}")
+        alias_routes: dict[str, Route] = {}
+        for name, target in raw_aliases.items():
+            route = _parse_route(target) if isinstance(target, str) else None
+            if route is None:
+                raise ConfigError(f"alias '{name}': invalid target '{target}' (expected 'provider:model')")
+            if route.provider not in known:
+                raise ConfigError(f"alias '{name}': unknown provider '{route.provider}'")
+            alias_routes[str(name)] = route
+        for i, entry in enumerate(key_entries):
+            if not isinstance(entry, dict):
+                raise ConfigError(f"key entry #{i} must be an object")
+            name = str(entry.get("name", "") or "")
+            api_key = _resolve_secret(entry, env, f"key entry #{i}")
+            granted_names = entry.get("aliases")
+            if not isinstance(granted_names, list) or not granted_names:
+                raise ConfigError(f"key '{name or f'#{i}'}' needs at least one alias")
+            merged: dict[str, set[str]] = {}
+            order: list[str] = []
+            for a in granted_names:
+                route = alias_routes.get(str(a))
+                if route is None:
+                    raise ConfigError(f"key '{name or f'#{i}'}' references unknown alias '{a}'")
+                if route.provider not in merged:
+                    merged[route.provider] = set()
+                    order.append(route.provider)
+                merged[route.provider].add(route.model)
+            grants = tuple(ModelGrant(provider=p, models=frozenset(merged[p])) for p in order)
+            provider = grants[0].provider if len(grants) == 1 else ""
+            bindings[api_key] = KeyBinding(api_key=api_key, provider=provider, name=name, grants=grants)
+        if key_entries:
+            logger.info(
+                "migrated v2 alias config to v3 grants: %d key(s), %d alias(es) resolved",
+                len(bindings), len(alias_routes),
+            )
+        return defs, bindings
+
+    # v1 → v3 migration (INV-8): synthesize explicit per-key grants.
     for i, entry in enumerate(key_entries):
         if not isinstance(entry, dict):
             raise ConfigError(f"key entry #{i} must be an object")
@@ -354,18 +420,14 @@ def load_config_v2(
             raise ConfigError(f"key entry #{i} references unknown provider '{provider}'")
         api_key = _resolve_secret(entry, env, f"key entry #{i}")
         routes = {str(k): str(v) for k, v in (entry.get("routes") or {}).items()}
-        for alias, model in routes.items():
-            if alias in aliases and aliases[alias] != Route(provider, model):
-                raise ConfigError(
-                    f"migration conflict: alias '{alias}' would map to both "
-                    f"'{aliases[alias].provider}:{aliases[alias].model}' and '{provider}:{model}'"
-                )
-            aliases[alias] = Route(provider=provider, model=model)
         if routes:
-            grants = frozenset(routes)
+            # v1 routes were {alias: model} on the bound provider: the alias
+            # was client-facing, the model upstream. Grant BOTH names so
+            # existing clients keep working after migration.
+            grants = (ModelGrant(provider=provider, models=frozenset(set(routes) | set(routes.values()))),)
             legacy = None
         else:
-            grants = frozenset({"*"})
+            grants = ()
             legacy = provider
         existing = bindings.get(api_key)
         if existing is not None:
@@ -376,15 +438,12 @@ def load_config_v2(
                 )
             continue
         bindings[api_key] = KeyBinding(
-            api_key=api_key, provider=provider, name=name, aliases=grants,
+            api_key=api_key, provider=provider, name=name, grants=grants,
             legacy_provider_grant=legacy,
         )
     if key_entries:
-        logger.info(
-            "migrated legacy key bindings to v2 alias grants: %d keys, %d aliases synthesized",
-            len(bindings), len(aliases),
-        )
-    return defs, bindings, aliases
+        logger.info("migrated legacy key bindings to v3 grants: %d key(s) processed", len(bindings))
+    return defs, bindings
 
 
 def load_provider_defs(
@@ -394,7 +453,7 @@ def load_provider_defs(
     return load_gateway_config(source, env)[0]
 
 
-@dataclass
+@dataclass(frozen=True)
 class Settings:
     host: str = "0.0.0.0"
     port: int = 8000
@@ -410,7 +469,6 @@ class Settings:
     provider_api_keys: dict[str, str] = field(default_factory=dict)
     custom_providers: dict[str, ProviderDef] = field(default_factory=dict)
     key_bindings: dict[str, KeyBinding] = field(default_factory=dict)
-    aliases: dict[str, Route] = field(default_factory=dict)
     _providers_source: str = ""
 
     @classmethod
@@ -431,10 +489,9 @@ class Settings:
 
         custom: dict[str, ProviderDef] = {}
         key_bindings: dict[str, KeyBinding] = {}
-        aliases: dict[str, Route] = {}
         source = get("GATEWAY_PROVIDERS_FILE") or get("GATEWAY_PROVIDERS")
         if source and source.strip():
-            custom, key_bindings, aliases = load_config_v2(source, env=env)
+            custom, key_bindings = load_config_v2(source, env=env)
             providers_source = source.strip() if source.strip().endswith(".json") or "/" in source.strip() else ""
         else:
             providers_source = ""
@@ -465,7 +522,6 @@ class Settings:
             provider_base_urls=base_urls,
             provider_api_keys=api_keys,
             custom_providers=custom,
-            aliases=aliases,
             key_bindings=key_bindings,
             _providers_source=providers_source,
         )
@@ -482,34 +538,53 @@ class Settings:
     def known_provider_names(self) -> set[str]:
         return KNOWN_PROVIDERS | set(self.custom_providers)
 
-    def _granted_aliases(self, binding: KeyBinding) -> dict[str, Route]:
-        """The effective route table for a v2 bound key: ∩(global aliases, key grants)."""
-        return {a: self.aliases[a] for a in binding.aliases if a in self.aliases}
+    def _grants_for(self, binding: KeyBinding) -> dict[str, str]:
+        """The effective model→provider table for a scoped key (closed set)."""
+        out: dict[str, str] = {}
+        for g in binding.grants:
+            for m in g.models:
+                out.setdefault(m, g.provider)
+        return out
+
+    def wildcard_providers(self, api_key: str | None) -> list[str]:
+        """Providers on which this scoped key holds a '*' (all-models) grant."""
+        binding = self.key_binding(api_key)
+        if binding is None or binding.legacy_provider_grant is not None:
+            return []
+        return [g.provider for g in binding.grants if "*" in g.models]
 
     def models_for_key(self, api_key: str | None) -> list[str]:
-        """Single source (INV-2): the alias names a key may use — /v1/models and
-        the deny error both derive their list from here."""
+        """Single source (INV-2): the model names a key may use — /v1/models
+        and the deny error both derive their list from here."""
         binding = self.key_binding(api_key)
-        if binding is None or binding.legacy_provider_grant:
-            ids = list(self.routes.keys()) + [a for a in self.aliases if a not in self.routes]
-            if self.default_route is not None and "default" not in ids:
-                ids.append("default")
-            return ids
-        return sorted(self._granted_aliases(binding))
+        if binding is not None and binding.legacy_provider_grant is None:
+            return sorted(self._grants_for(binding))
+        # Admin keys (GATEWAY_API_KEYS) and legacy provider-bound keys see the
+        # env-route names; scoped keys in v3 see only their granted models.
+        ids = list(self.routes.keys())
+        if self.default_route is not None and "default" not in ids:
+            ids.append("default")
+        return ids
 
     def resolve(self, model: str, gateway_key: str | None = None) -> Route | None:
         """Resolve a requested model name to a Route.
 
-        v2 key-bound traffic resolves closed (INV-1): only granted aliases.
-        Admin keys (GATEWAY_API_KEYS) and legacy provider-bound keys keep the
-        full historical behavior (routes, direct provider:model, default route).
+        Scoped keys (v3 grants) resolve closed (INV-1): only granted upstream
+        model names. Admin keys (GATEWAY_API_KEYS) and legacy provider-bound
+        keys keep the full historical behavior (routes, direct provider:model,
+        default route).
         """
         binding = self.key_binding(gateway_key)
 
-        if binding is not None and binding.aliases and binding.legacy_provider_grant is None:
-            granted = self._granted_aliases(binding)
+        if binding is not None and binding.legacy_provider_grant is None and binding.grants:
+            granted = self._grants_for(binding)
             if model in granted:
-                return granted[model]
+                return Route(provider=granted[model], model=model)
+            # Wildcard grant: "*" passes the requested model name verbatim to
+            # every wildcard-granted provider (first grant wins on overlap).
+            for g in binding.grants:
+                if "*" in g.models:
+                    return Route(provider=g.provider, model=model)
             raise ModelNotGranted(model, sorted(granted))
 
         if binding is None:

@@ -14,8 +14,7 @@ V2 = {
     "providers": [
         {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
-    "aliases": {"fast": "or:gpt-4o-mini"},
-    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "aliases": ["fast"]}],
+    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "grants": [{"provider": "or", "models": ["gpt-4o-mini"]}]}],
 }
 
 
@@ -69,11 +68,11 @@ def test_put_admin_config_rejects_secret_values(tmp_path, captured):
 def test_validate_endpoint_no_mutation(tmp_path, captured):
     c, store = make_client(tmp_path, captured)
     staged = json.loads(json.dumps(V2))
-    staged["keys"][0]["aliases"] = []
+    staged["keys"][0]["grants"] = []
     r = c.post("/admin/config/validate", headers=H, json=staged)
     assert r.status_code == 200
     assert r.json()["valid"] is False
-    assert any("alias" in e for e in r.json()["errors"])
+    assert any("grant" in e for e in r.json()["errors"])
     assert json.loads((tmp_path / "providers.json").read_text()) == V2  # untouched
     assert store.settings is not None
 
@@ -81,18 +80,18 @@ def test_validate_endpoint_no_mutation(tmp_path, captured):
 def test_apply_endpoint_swaps_and_persists(tmp_path, captured):
     c, store = make_client(tmp_path, captured)
     staged = json.loads(json.dumps(V2))
-    staged["aliases"]["smart"] = "or:gpt-4o"
-    staged["keys"].append({"name": "team-b", "api_key_env": "KEY_B", "aliases": ["smart"]})
+    staged["keys"].append({"name": "team-b", "api_key_env": "KEY_B", "grants": [{"provider": "or", "models": ["gpt-4o"]}]})
     r = c.put("/admin/config", headers=H, json=staged)
     assert r.status_code == 200
     assert json.loads((tmp_path / "providers.json").read_text()) == staged
-    assert "smart" in store.settings.aliases
+    grants = {g.provider: g.models for g in store.settings.key_bindings["key-b-val"].grants}
+    assert grants == {"or": frozenset({"gpt-4o"})}
     # invalid staged config rejected with the same validation body
     bad = json.loads(json.dumps(staged))
-    bad["keys"][1]["aliases"] = []
+    bad["keys"][1]["grants"] = []
     r = c.put("/admin/config", headers=H, json=bad)
     assert r.status_code == 400
-    assert any("alias" in e for e in r.json()["detail"]["errors"])
+    assert any("grant" in e for e in r.json()["detail"]["errors"])
 
 
 def test_admin_endpoints_require_gateway_key(tmp_path, captured):
@@ -113,17 +112,17 @@ def make_logged_client(tmp_path, captured):
 def test_log_records_metadata_after_request(tmp_path, captured):
     c, _ = make_logged_client(tmp_path, captured)
     r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-a-val"},
-               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+               json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 200
     r = c.get("/admin/log", headers=H)
     assert r.status_code == 200
     body = r.json()
     assert body["entries"]
     e = body["entries"][0]
-    assert set(e) >= {"seq", "ts", "key_name", "alias", "resolved", "status",
+    assert set(e) >= {"seq", "ts", "key_name", "model", "resolved", "status",
                       "latency_ms", "tokens_in", "tokens_out", "compressed", "tokens_saved"}
     assert e["key_name"] == "team-a"
-    assert e["alias"] == "fast"
+    assert e["model"] == "gpt-4o-mini"
     assert e["resolved"] == "or:gpt-4o-mini"
     assert e["status"] == 200
 
@@ -139,7 +138,7 @@ def test_log_cursor_and_bounded(tmp_path, captured):
 def test_log_never_contains_bodies_or_key_values(tmp_path, captured):
     c, _ = make_logged_client(tmp_path, captured)
     c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-a-val"},
-           json={"model": "fast", "messages": [{"role": "user", "content": "SECRET-PROMPT"}]})
+           json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "SECRET-PROMPT"}]})
     raw = c.get("/admin/log", headers=H).text
     assert "SECRET-PROMPT" not in raw
     assert "key-a-val" not in raw
@@ -178,7 +177,7 @@ def test_put_admin_config_rejects_key_secret_values(tmp_path, captured):
 def test_issue_key_generated_shown_once(tmp_path, captured):
     c, _ = make_client(tmp_path, captured)
     staged = json.loads(json.dumps(V2))
-    staged["keys"].append({"name": "team-b", "api_key_env": None, "aliases": ["fast"]})
+    staged["keys"].append({"name": "team-b", "api_key_env": None, "grants": [{"provider": "or", "models": ["gpt-4o-mini"]}]})
     staged["keys"][1].pop("api_key_env")
     r = c.put("/admin/config", headers=H, json=staged)
     assert r.status_code == 200
@@ -188,7 +187,7 @@ def test_issue_key_generated_shown_once(tmp_path, captured):
     assert value.startswith("hr_")
     # generated key authenticates immediately
     r = c.post("/v1/chat/completions", headers={"Authorization": f"Bearer {value}"},
-               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+               json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 200
     # never shown again: GET admin config and repeat PUT drain it
     assert value not in c.get("/admin/config", headers=H).text
@@ -196,7 +195,7 @@ def test_issue_key_generated_shown_once(tmp_path, captured):
     assert r2.json()["generated"] == []
     # round-trip did not regenerate: the same value still authenticates
     r = c.post("/v1/chat/completions", headers={"Authorization": f"Bearer {value}"},
-               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+               json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 200
 
 
@@ -234,7 +233,7 @@ def test_pasted_provider_key_stored_and_used(tmp_path, captured):
     assert disk["providers"][0]["api_key"] == "sk-pasted-secret"
     # ...used for upstream auth...
     r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-a-val"},
-               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+               json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 200
     assert captured["requests"][0]["headers"]["authorization"] == "Bearer sk-pasted-secret"
     # ...and never in any GET
@@ -258,7 +257,7 @@ def test_blank_on_edit_keeps_existing_key(tmp_path, captured):
     disk = json.loads((tmp_path / "providers.json").read_text())
     assert disk["providers"][0]["api_key"] == "sk-first"  # kept, not wiped
     r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-a-val"},
-               json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+               json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]})
     assert captured["requests"][0]["headers"]["authorization"] == "Bearer sk-first"
 
 
@@ -331,7 +330,7 @@ def test_escalation_chain_blocked(scoped_client, tmp_path, captured):
     # Mary's exact exploit: scoped key PUTs a config granting itself admin
     current = json.loads(scoped_client.get("/admin/config", headers=H).text)
     staged = json.loads(json.dumps(current))
-    staged["keys"].append({"name": "escalator", "api_key": "hr_escalated", "aliases": ["fast"]})
+    staged["keys"].append({"name": "escalator", "api_key": "hr_escalated", "grants": [{"provider": "or", "models": ["gpt-4o-mini"]}]})
     for p in staged["providers"]:
         p.pop("api_key_set", None)
     r = scoped_client.put("/admin/config", headers={"Authorization": "Bearer key-a-val"}, json=staged)
@@ -355,7 +354,7 @@ def test_apply_unwritable_config_file_specific_error(tmp_path, captured, monkeyp
     import os
     c, store = make_client(tmp_path, captured)
     staged = json.loads(json.dumps(V2))
-    staged["aliases"]["smart"] = "or:gpt-4o"
+    staged["keys"][0]["grants"][0]["models"] = ["gpt-4o"]
     # make the persist target a directory -> os.replace fails with OSError
     os.unlink(tmp_path / "providers.json")
     (tmp_path / "providers.json").mkdir()

@@ -26,8 +26,7 @@ CONFIG = {
         {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
         {"name": "local", "type": "ollama", "base_url": "http://localhost:11434/v1"},
     ],
-    "aliases": {"fast": "or:gpt-4o-mini"},
-    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "aliases": ["fast"]}],
+    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "grants": [{"provider": "or", "models": ["gpt-4o-mini"]}]}],
 }
 
 CHECK_JS = """
@@ -38,23 +37,23 @@ async (page) => {
   await page.locator("#gate-save").click();
   await page.waitForSelector("#key-gate[hidden]", {timeout: 5000});
 
-  // --- alias form: target must accept a full provider:model value ---
+  // --- grant form: one row per provider; each row's models input must accept full upstream names ---
   await page.locator("#tab-keys").click();
-  await page.locator("#add-alias").click();
-  const target = page.locator("#sf-target");
-  const tag = await target.evaluate(el => el.tagName.toLowerCase());
+  await page.locator("[data-addgrant]").first().click();
+  const models = page.locator(".grants-form .grant-row input").first();
+  const tag = await models.evaluate(el => el.tagName.toLowerCase());
   if (tag === "select") {
     // a select is only legal if some option is already a complete value
-    const opts = await target.locator("option").allTextContents();
-    const complete = opts.some(o => /^[^:]+:.+/.test(o));
-    results.push({form: "alias target", ok: complete, why: `select options: ${opts.join(", ")}`});
+    const opts = await models.locator("option").allTextContents();
+    const complete = opts.some(o => o.trim().length > 0);
+    results.push({form: "grant models", ok: complete, why: `select options: ${opts.join(", ")}`});
   }
   await page.locator("[data-cancel]").click();
 
   // --- provider form: base_url free text, type select covers types ---
   await page.locator("#tab-providers").click();
   await page.locator("#add-provider").click();
-  const base = page.locator("#sf-base_url");
+  const base = page.locator(".stage-form [name=base_url]");
   const baseTag = await base.evaluate(el => el.tagName.toLowerCase());
   if (baseTag === "select") {
     const opts = await base.locator("option").allTextContents();
@@ -101,29 +100,29 @@ def main() -> int:
                 page.click("#gate-save")
                 page.wait_for_selector("#key-gate", state="hidden", timeout=5000)
 
-                # alias target control must express a full provider:model
+                # grant form: one row per provider; models control must express full upstream model names
                 page.click("#tab-keys")
-                page.click("#add-alias")
-                tag = page.eval_on_selector("#sf-target", "el => el.tagName.toLowerCase()")
+                page.click("[data-addgrant]")
+                row = ".grants-form .grant-row input"
+                tag = page.eval_on_selector(row, "el => el.tagName.toLowerCase()")
                 if tag == "select":
-                    opts = page.eval_on_selector_all("#sf-target option", "els => els.map(e => e.textContent)")
-                    if not any(":" in o and not o.endswith(":") for o in opts):
-                        failures.append(f"alias target select can't express a complete value: {opts}")
+                    opts = page.eval_on_selector_all(row + " option", "els => els.map(e => e.textContent)")
+                    if not any(o.strip() for o in opts):
+                        failures.append(f"grant models select can't express a value: {opts}")
                     if page.locator("[data-cancel]").count():
                         page.click("[data-cancel]")
                 else:
                     # free text: prove a typed full value stages (form closes on submit)
-                    page.fill("#sf-name", "advcheck")
-                    page.fill("#sf-target", "or:gpt-4o")
+                    page.fill(row, "gpt-4o")
                     page.click(".stage-form button[type=submit]")
                     page.wait_for_selector("#stage-bar:not([hidden])", timeout=5000)
 
                 # provider base_url: select options must be complete URLs, or free text
                 page.click("#tab-providers")
                 page.click("#add-provider")
-                tag = page.eval_on_selector("#sf-base_url", "el => el.tagName.toLowerCase()")
+                tag = page.eval_on_selector(".stage-form [name=base_url]", "el => el.tagName.toLowerCase()")
                 if tag == "select":
-                    opts = page.eval_on_selector_all("#sf-base_url option", "els => els.map(e => e.textContent)")
+                    opts = page.eval_on_selector_all(".stage-form [name=base_url] option", "els => els.map(e => e.textContent)")
                     if not all(o.startswith("http") for o in opts):
                         failures.append(f"provider base_url select has non-URL options: {opts}")
                 page.click("[data-cancel]")

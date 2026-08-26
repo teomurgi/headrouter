@@ -12,18 +12,16 @@ V2 = {
     "providers": [
         {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
-    "aliases": {"fast": "or:gpt-4o-mini"},
-    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "aliases": ["fast"]}],
+    "keys": [{"name": "team-a", "api_key_env": "KEY_A", "grants": [{"provider": "or", "models": ["gpt-4o-mini"]}]}],
 }
 
 V2_B = {
     "providers": [
         {"name": "or", "type": "openrouter", "base_url": "https://or.test/v1", "api_key_env": "OR_KEY"},
     ],
-    "aliases": {"fast": "or:gpt-4o-mini", "smart": "or:gpt-4o"},
     "keys": [
-        {"name": "team-a", "api_key_env": "KEY_A", "aliases": ["fast"]},
-        {"name": "team-b", "api_key_env": "KEY_B", "aliases": ["smart"]},
+        {"name": "team-a", "api_key_env": "KEY_A", "grants": [{"provider": "or", "models": ["gpt-4o-mini"]}]},
+        {"name": "team-b", "api_key_env": "KEY_B", "grants": [{"provider": "or", "models": ["gpt-4o"]}]},
     ],
 }
 
@@ -46,8 +44,9 @@ def make_store(tmp_path, data=V2) -> ConfigStore:
 
 def test_load_initial(tmp_path):
     store = make_store(tmp_path)
-    assert store.settings.aliases == {"fast": Route("or", "gpt-4o-mini")}
-    assert "key-a" in store.settings.key_bindings
+    binding = store.settings.key_bindings["key-a"]
+    assert binding.grants[0].provider == "or"
+    assert binding.grants[0].models == frozenset({"gpt-4o-mini"})
 
 
 def test_apply_swaps_settings_atomically(tmp_path):
@@ -72,8 +71,8 @@ def test_invalid_apply_rejected_no_mutation(tmp_path):
     store = make_store(tmp_path)
     before = store.settings
     bad = json.loads(json.dumps(V2_B))
-    bad["keys"][0]["aliases"] = []
-    with pytest.raises(Exception, match="alias"):
+    bad["keys"][0]["grants"] = []
+    with pytest.raises(Exception, match="grant"):
         store.apply(bad)
     assert store.settings is before
     assert json.loads((tmp_path / "providers.json").read_text()) == V2
@@ -96,7 +95,7 @@ def test_concurrent_apply_serialized(tmp_path):
     # last writer wins cleanly; disk holds exactly one of the two configs
     on_disk = json.loads((tmp_path / "providers.json").read_text())
     assert on_disk in (V2, V2_B)
-    assert store.settings.aliases  # coherent snapshot either way
+    assert store.settings.key_bindings  # coherent snapshot either way
 
 
 # --- live auth after apply (AuthMiddleware must read current settings) -------
@@ -116,10 +115,10 @@ def test_new_key_authenticates_after_apply(tmp_path, captured):
     with TestClient(app) as c:
         # key-b not yet known -> 401
         r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-b"},
-                   json={"model": "fast", "messages": [{"role": "user", "content": "hi"}]})
+                   json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 401
         store.apply(V2_B)
         # after apply, key-b authenticates and routes (no app restart)
         r = c.post("/v1/chat/completions", headers={"Authorization": "Bearer key-b"},
-                   json={"model": "smart", "messages": [{"role": "user", "content": "hi"}]})
+                   json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 200

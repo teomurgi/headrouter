@@ -196,6 +196,16 @@ class GeminiAdapter(BaseAdapter):
             raise AdapterError(resp.status_code, error_body(resp))
         return from_gemini_response(resp.json(), model)
 
+    async def models(self, client: httpx.AsyncClient) -> list[str]:
+        resp = await client.get(f"{self.base_url}/v1beta/models", headers=self._headers())
+        if resp.status_code >= 400:
+            raise AdapterError(resp.status_code, error_body(resp))
+        out = []
+        for m in resp.json().get("models", []):
+            if isinstance(m, dict) and m.get("name"):
+                out.append(str(m["name"]).removeprefix("models/"))
+        return out
+
     async def stream(self, client: httpx.AsyncClient, body: dict) -> AsyncIterator[bytes]:
         model = body.get("model", "")
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"

@@ -20,7 +20,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [tool.setuptools]
-py-modules = ["app", "config", "schemas", "compression_service"]
+py-modules = ["app", "config", "config_store", "schemas", "compression_service", "request_log"]
 
 [tool.setuptools.packages.find]
 include = ["adapters*", "middleware*", "routes*"]

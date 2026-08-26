@@ -1,7 +1,7 @@
 """Atomic config lifecycle (INV-4): load → validate → swap → persist.
 
 A ConfigStore owns one providers.json file. Applies build a fresh immutable
-Settings, validate it, atomically swap the live snapshot, and persist the v2
+Settings, validate it, atomically swap the live snapshot, and persist the
 shape via tmp-file + os.replace. In-flight requests keep the old snapshot
 because Settings is immutable and never mutated in place.
 """
@@ -30,8 +30,8 @@ class ConfigStore:
         self._env = env
         self._lock = threading.Lock()
         self._async_lock: asyncio.Lock | None = None
-        defs, keys, aliases = load_config_v2(str(self.path), env=self._env)
-        self._settings = self._build(defs, keys, aliases)
+        defs, keys = load_config_v2(str(self.path), env=self._env)
+        self._settings = self._build(defs, keys)
         self._migrated_keys = {k for k, b in keys.items() if b.legacy_provider_grant}
         self._listeners: list = []
         self._raw: dict = self._read_raw()
@@ -64,12 +64,11 @@ class ConfigStore:
             k.pop("api_key", None)
         return data
 
-    def _build(self, defs, keys, aliases) -> Settings:
+    def _build(self, defs, keys) -> Settings:
         return replace(
             self._base,
             custom_providers=defs,
             key_bindings=keys,
-            aliases=aliases,
         )
 
     @property
@@ -127,8 +126,8 @@ class ConfigStore:
             value = "hr_" + secrets.token_urlsafe(24)
             k["api_key"] = value
             self._last_generated.append({"name": name or "key", "api_key": value})
-        defs, keys, aliases = load_config_v2(data, env=self._env)
-        return defs, keys, aliases
+        defs, keys = load_config_v2(data, env=self._env)
+        return defs, keys
 
     def _persist(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,17 +146,17 @@ class ConfigStore:
             raise
 
     def _do_apply(self, data: dict) -> Settings:
-        defs, keys, aliases = self._prepare(data)
+        defs, keys = self._prepare(data)
         self._persist(data)
-        settings = self._build(defs, keys, aliases)
+        settings = self._build(defs, keys)
         self._migrated_keys = {k for k, b in keys.items() if b.legacy_provider_grant}
         self._settings = settings
         self._raw = data
         for listener in self._listeners:
             listener(settings)
         logger.info(
-            "config applied atomically: %d provider(s), %d alias(es), %d key(s)%s",
-            len(defs), len(aliases), len(keys),
+            "config applied atomically: %d provider(s), %d key(s)%s",
+            len(defs), len(keys),
             f" ({len(self._migrated_keys)} migrated grant(s) pending review)" if self._migrated_keys else "",
         )
         return settings

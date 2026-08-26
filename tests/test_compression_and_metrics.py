@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -51,7 +52,7 @@ def test_compression_prefetch_starts_only_when_enabled(monkeypatch):
 
 def test_compression_prefetch_runs_on_startup(settings, captured, monkeypatch):
     calls = []
-    settings.compression_prefetch_enabled = True
+    settings = replace(settings, compression_prefetch_enabled=True)
     monkeypatch.setattr(
         CompressionService,
         "prefetch",
@@ -189,7 +190,7 @@ def test_metrics_endpoint_tracks_requests(client):
 
 
 def test_compression_metrics_recorded(settings, captured):
-    settings.compression_threshold_tokens = 1
+    settings = replace(settings, compression_threshold_tokens=1)
     app = create_app(
         settings=settings,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(make_handler(captured))),
