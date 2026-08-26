@@ -53,7 +53,8 @@ class ConfigStore:
     def sanitized_config(self) -> dict:
         """The applied config as the admin API may return it (INV-5, clause 1):
         env-var names and a set/not-set hint only — never secret values."""
-        data = json.loads(json.dumps(self._raw))  # deep copy
+        with self._lock:
+            data = json.loads(json.dumps(self._raw))  # deep copy
         for p in data.get("providers", []):
             if "api_key" in p:
                 p.pop("api_key")
@@ -105,7 +106,7 @@ class ConfigStore:
             if p.get("api_key"):
                 continue
             saved = saved_providers.get(p.get("name"))
-            if saved is not None and saved.get("api_key") and not saved.get("_strip_credential"):
+            if saved is not None and saved.get("api_key"):
                 p["api_key"] = saved["api_key"]  # blank-on-edit keeps existing
         for p in data.get("providers", []):
             if isinstance(p, dict):
@@ -145,13 +146,15 @@ class ConfigStore:
                 pass
             raise
 
-    def _do_apply(self, data: dict) -> Settings:
+    def _do_apply(self, data: dict) -> tuple[Settings, list[dict]]:
         defs, keys = self._prepare(data)
         self._persist(data)
         settings = self._build(defs, keys)
         self._migrated_keys = {k for k, b in keys.items() if b.legacy_provider_grant}
         self._settings = settings
         self._raw = data
+        generated = self._last_generated
+        self._last_generated = []
         for listener in self._listeners:
             listener(settings)
         logger.info(
@@ -159,13 +162,13 @@ class ConfigStore:
             len(defs), len(keys),
             f" ({len(self._migrated_keys)} migrated grant(s) pending review)" if self._migrated_keys else "",
         )
-        return settings
+        return settings, generated
 
-    def apply(self, data: dict) -> Settings:
+    def apply(self, data: dict) -> tuple[Settings, list[dict]]:
         with self._lock:
             return self._do_apply(data)
 
-    async def apply_async(self, data: dict) -> Settings:
+    async def apply_async(self, data: dict) -> tuple[Settings, list[dict]]:
         if self._async_lock is None:
             self._async_lock = asyncio.Lock()
         async with self._async_lock:
@@ -174,9 +177,3 @@ class ConfigStore:
     def validate(self, data: dict) -> list[str]:
         """Dry-run validation only (POST /admin/config/validate)."""
         return validate_config(data)
-
-    def pop_generated(self) -> list[dict]:
-        """One-time generated key values from the last apply (drained on read)."""
-        out = self._last_generated
-        self._last_generated = []
-        return out

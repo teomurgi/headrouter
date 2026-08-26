@@ -19,10 +19,11 @@ def test_estimate_tokens_fallback():
     assert tokens >= 50
 
 
-def test_compression_disabled_passthrough():
+@pytest.mark.asyncio
+async def test_compression_disabled_passthrough():
     svc = CompressionService(enabled=False, threshold_tokens=0)
     messages = [{"role": "user", "content": "hi"}]
-    result = svc.maybe_compress(messages)
+    result = await svc.maybe_compress(messages)
     assert result.messages is messages
     assert not result.applied
 
@@ -70,15 +71,17 @@ def test_compression_prefetch_runs_on_startup(settings, captured, monkeypatch):
     assert calls == ["coding"]
 
 
-def test_compression_below_threshold():
+@pytest.mark.asyncio
+async def test_compression_below_threshold():
     svc = CompressionService(enabled=True, threshold_tokens=100000)
     messages = [{"role": "user", "content": "hi"}]
-    result = svc.maybe_compress(messages)
+    result = await svc.maybe_compress(messages)
     assert not result.applied
     assert result.messages is messages
 
 
-def test_compression_uses_headroom_pipeline_when_available():
+@pytest.mark.asyncio
+async def test_compression_uses_headroom_pipeline_when_available():
     svc = CompressionService(enabled=True, threshold_tokens=1)
     messages = [
         {"role": "user", "content": "hello"},
@@ -98,7 +101,7 @@ def test_compression_uses_headroom_pipeline_when_available():
 
     svc._pipeline_checked = True
     svc._pipeline = FakePipeline()
-    result = svc.maybe_compress(messages)
+    result = await svc.maybe_compress(messages)
     assert result.applied
     assert result.engine == "headroom"
     assert result.messages == [{"role": "user", "content": "ok"}]
@@ -106,7 +109,8 @@ def test_compression_uses_headroom_pipeline_when_available():
     assert result.transforms_applied == ["router:mixed:0.5"]
 
 
-def test_compression_never_grows_context():
+@pytest.mark.asyncio
+async def test_compression_never_grows_context():
     svc = CompressionService(enabled=True, threshold_tokens=1)
 
     class BadResult:
@@ -121,12 +125,13 @@ def test_compression_never_grows_context():
     svc._pipeline_checked = True
     svc._pipeline = BadPipeline()
     messages = [{"role": "user", "content": "hi"}]
-    result = svc.maybe_compress(messages)
+    result = await svc.maybe_compress(messages)
     assert not result.applied
     assert result.messages is messages
 
 
-def test_compression_pipeline_exception_passthrough():
+@pytest.mark.asyncio
+async def test_compression_pipeline_exception_passthrough():
     svc = CompressionService(enabled=True, threshold_tokens=1)
 
     class BoomPipeline:
@@ -136,7 +141,7 @@ def test_compression_pipeline_exception_passthrough():
     svc._pipeline_checked = True
     svc._pipeline = BoomPipeline()
     messages = [{"role": "user", "content": "hello world"}]
-    result = svc.maybe_compress(messages)
+    result = await svc.maybe_compress(messages)
     assert not result.applied
     assert result.messages is messages
 
@@ -154,7 +159,8 @@ def test_coding_strategy_configures_headroom_router():
     assert not service._compress_system_messages
 
 
-def test_compression_with_real_headroom():
+@pytest.mark.asyncio
+async def test_compression_with_real_headroom():
     import json as _json
 
     svc = CompressionService(enabled=True, threshold_tokens=4000)
@@ -168,7 +174,7 @@ def test_compression_with_real_headroom():
         {"role": "system", "content": "You are helpful."},
         {"role": "user", "content": big},
     ]
-    result = svc.maybe_compress(messages, model="gpt-4o")
+    result = await svc.maybe_compress(messages, model="gpt-4o")
     assert result.applied
     assert result.tokens_after < result.tokens_before
     assert result.tokens_saved > 0
@@ -209,7 +215,7 @@ def test_compression_metrics_recorded(settings, captured):
 
 def test_compression_result_is_always_logged(client, caplog):
     class FakeCompression:
-        def maybe_compress(self, messages, model):
+        async def maybe_compress(self, messages, model):
             return CompressionResult(
                 messages=messages,
                 applied=True,
@@ -236,7 +242,7 @@ def test_compression_result_is_always_logged(client, caplog):
 
 def test_compression_noop_result_is_logged(client, caplog):
     class FakeCompression:
-        def maybe_compress(self, messages, model):
+        async def maybe_compress(self, messages, model):
             return CompressionResult(
                 messages=messages,
                 applied=False,

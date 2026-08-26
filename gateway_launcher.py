@@ -31,14 +31,24 @@ def _ensure_providers_file() -> str:
     if not target.exists():
         # Seed an empty, valid config. The example template references env vars
         # that are not set, which would fail validation on first boot; users
-        # build their config via the admin UI.
+        # build their config via the admin UI. This file later holds secrets
+        # (provider api_key values), so seed it non-world-readable from the start.
+        target.touch(mode=0o600)
+        os.chmod(target, 0o600)
         target.write_text('{"providers": [], "keys": []}\n', encoding="utf-8")
     return str(target)
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Only default to listening on all interfaces once gateway keys are
+    # configured; an unauthenticated gateway should not be reachable off-host.
+    has_keys = bool(os.environ.get("GATEWAY_API_KEYS", "").strip()) or bool(
+        os.environ.get("GATEWAY_PROVIDERS_FILE") or os.environ.get("GATEWAY_PROVIDERS")
+    )
+    default_host = "0.0.0.0" if has_keys else "127.0.0.1"
+
     p = argparse.ArgumentParser(description="Headrouter gateway server")
-    p.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    p.add_argument("--host", default=os.environ.get("HOST", default_host))
     p.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     p.add_argument("--no-prefetch", action="store_true", help="skip compression model prefetch")
     args = p.parse_args(argv)

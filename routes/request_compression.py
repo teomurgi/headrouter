@@ -8,13 +8,13 @@ from typing import Any
 from compression_service import CompressionResult
 
 
-def compress_request_messages(
+async def compress_request_messages(
     state: Any,
     body: dict[str, Any],
     model: str,
     logger: logging.Logger,
 ) -> CompressionResult:
-    result = state.compression.maybe_compress(body.get("messages") or [], model)
+    result = await state.compression.maybe_compress(body.get("messages") or [], model)
     body["messages"] = result.messages
     state.metrics.observe_compression(
         result.tokens_before,

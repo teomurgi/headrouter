@@ -8,6 +8,7 @@ Compression NEVER blocks a request: any failure degrades to passthrough.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -173,11 +174,16 @@ class CompressionService:
     def _count(self, messages: list[dict], model: str) -> int:
         return self._counter.count(messages, model)
 
-    def maybe_compress(self, messages: list[dict], model: str = "gpt-4o") -> CompressionResult:
-        tokens_before = self._count(messages, model)
-        if not self.enabled or not messages:
-            return CompressionResult(messages, False, tokens_before, tokens_before)
+    async def maybe_compress(self, messages: list[dict], model: str = "gpt-4o") -> CompressionResult:
+        """Runs the (synchronous, CPU-bound) counting/compression work off the
+        event loop thread so it never blocks other in-flight requests."""
+        return await asyncio.to_thread(self._maybe_compress_sync, messages, model)
 
+    def _maybe_compress_sync(self, messages: list[dict], model: str = "gpt-4o") -> CompressionResult:
+        if not self.enabled or not messages:
+            return CompressionResult(messages, False, 0, 0)
+
+        tokens_before = self._count(messages, model)
         if tokens_before <= self.threshold_tokens:
             return CompressionResult(messages, False, tokens_before, tokens_before)
 

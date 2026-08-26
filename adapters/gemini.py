@@ -6,6 +6,7 @@ import json
 import time
 import uuid
 from typing import Any, AsyncIterator
+from urllib.parse import quote
 
 import httpx
 
@@ -177,7 +178,7 @@ class GeminiAdapter(BaseAdapter):
 
     def _url(self, model: str, stream: bool) -> str:
         action = "streamGenerateContent?alt=sse" if stream else "generateContent"
-        return f"{self.base_url}/v1beta/models/{model}:{action}"
+        return f"{self.base_url}/v1beta/models/{quote(model, safe='')}:{action}"
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -201,9 +202,22 @@ class GeminiAdapter(BaseAdapter):
         if resp.status_code >= 400:
             raise AdapterError(resp.status_code, error_body(resp))
         out = []
-        for m in resp.json().get("models", []):
-            if isinstance(m, dict) and m.get("name"):
-                out.append(str(m["name"]).removeprefix("models/"))
+        page = resp.json()
+        while True:
+            for m in page.get("models", []):
+                if isinstance(m, dict) and m.get("name"):
+                    out.append(str(m["name"]).removeprefix("models/"))
+            next_token = page.get("nextPageToken")
+            if not next_token:
+                break
+            resp = await client.get(
+                f"{self.base_url}/v1beta/models",
+                params={"pageToken": next_token},
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                raise AdapterError(resp.status_code, error_body(resp))
+            page = resp.json()
         return out
 
     async def stream(self, client: httpx.AsyncClient, body: dict) -> AsyncIterator[bytes]:

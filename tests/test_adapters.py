@@ -93,11 +93,13 @@ def test_anthropic_stream(client):
         lines = [line for line in r.iter_lines() if line.startswith("data: ")]
     payloads = [json.loads(line[6:]) for line in lines[:-1]]
     assert lines[-1] == "data: [DONE]"
-    text = "".join(c["choices"][0]["delta"].get("content", "") for c in payloads)
+    assert payloads[-1]["usage"]["completion_tokens"] > 0
+    content_payloads = [c for c in payloads if c["choices"]]
+    text = "".join(c["choices"][0]["delta"].get("content", "") for c in content_payloads)
     assert text == "Hi there"
-    assert payloads[0]["choices"][0]["delta"]["role"] == "assistant"
-    assert payloads[-1]["choices"][0]["finish_reason"] == "stop"
-    assert payloads[0]["object"] == "chat.completion.chunk"
+    assert content_payloads[0]["choices"][0]["delta"]["role"] == "assistant"
+    assert content_payloads[-1]["choices"][0]["finish_reason"] == "stop"
+    assert content_payloads[0]["object"] == "chat.completion.chunk"
 
 
 def test_gemini_conversion_nonstream(client, captured):

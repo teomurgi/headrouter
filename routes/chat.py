@@ -95,7 +95,7 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     body["model"] = route.model
     body.pop("n", None)
 
-    compression_result = compress_request_messages(state, body, route.model, logger)
+    compression_result = await compress_request_messages(state, body, route.model, logger)
 
     started = time.perf_counter()
 
@@ -176,9 +176,26 @@ async def _stream_response(state, settings, request, adapter, body, route,
 
     async def stream_body():
         status = 200
+        tokens = {"prompt_tokens": 0, "completion_tokens": 0}
+
+        def _note_usage(raw: bytes) -> None:
+            for line in raw.decode("utf-8", "ignore").split("\n"):
+                line = line.strip()
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                try:
+                    usage = json.loads(line[6:]).get("usage")
+                except Exception:
+                    continue
+                if usage:
+                    tokens["prompt_tokens"] = usage.get("prompt_tokens", tokens["prompt_tokens"])
+                    tokens["completion_tokens"] = usage.get("completion_tokens", tokens["completion_tokens"])
+
         try:
+            _note_usage(first)
             yield first
             async for chunk in gen:
+                _note_usage(chunk)
                 yield chunk
         except AdapterError as exc:
             status = exc.status_code
@@ -196,8 +213,11 @@ async def _stream_response(state, settings, request, adapter, body, route,
             await gen.aclose()
             latency = time.perf_counter() - started
             state.metrics.observe_request(route.provider, status, latency)
+            state.metrics.observe_usage(tokens["prompt_tokens"], tokens["completion_tokens"])
             _log_request(
                 state, settings, gateway_key, model, route, status, latency,
+                tokens_in=tokens["prompt_tokens"],
+                tokens_out=tokens["completion_tokens"],
                 compressed=compression_result.applied,
                 tokens_saved=getattr(compression_result, "tokens_saved", 0),
             )

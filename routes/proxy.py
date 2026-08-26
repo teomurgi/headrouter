@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 import time
 from typing import AsyncIterator
 
@@ -51,22 +52,44 @@ MAX_PEEK_BYTES = 64 * 1024
 MAX_ERROR_LOG_BYTES = 16 * 1024
 
 
-def _resolve_route(request: Request, body: bytes, settings: Settings):
-    """Return (provider, target_model), 'denied' for a closed-resolution miss, or None."""
+class _Denied:
+    """Sentinel wrapper for a closed-resolution miss; distinct from any provider name."""
+
+    __slots__ = ("exc",)
+
+    def __init__(self, exc):
+        self.exc = exc
+
+
+def _is_scoped_key(binding) -> bool:
+    """True for v3 grant-based keys, which must resolve closed (INV-1)."""
+    return binding is not None and binding.legacy_provider_grant is None and bool(binding.grants)
+
+
+def _resolve_route(request: Request, body: bytes, body_uninspected: bool, settings: Settings):
+    """Return (provider, target_model), a _Denied wrapper for a closed-resolution
+    miss, or None."""
     gateway_key = getattr(request.state, "gateway_key", None)
+    binding = settings.key_binding(gateway_key)
     if body:
         try:
             model = json.loads(body).get("model")
-            if isinstance(model, str):
-                try:
-                    route = settings.resolve(model, gateway_key)
-                except ModelNotGranted as exc:
-                    return "denied", exc
-                if route is not None:
-                    return route.provider, route.model
-        except Exception:
-            pass
-    binding = settings.key_binding(gateway_key)
+        except (json.JSONDecodeError, ValueError):
+            model = None
+        if isinstance(model, str):
+            try:
+                route = settings.resolve(model, gateway_key)
+            except ModelNotGranted as exc:
+                return _Denied(exc)
+            if route is not None:
+                return route.provider, route.model
+
+    if body_uninspected and _is_scoped_key(binding):
+        # A scoped (grant-based) key must have its requested model inspected
+        # to enforce INV-1; a body too large/chunked/non-JSON to inspect must
+        # not silently fall through to a provider the key wasn't granted.
+        return _Denied(ModelNotGranted("<uninspected body>", settings.models_for_key(gateway_key)))
+
     if binding is not None and binding.provider:
         # Single-provider bindings (legacy grants, single-grant v3 keys) can
         # still route model-less requests; multi-provider keys cannot — they
@@ -92,7 +115,11 @@ def _denied_response(exc) -> JSONResponse:
 
 
 def _target_url(base_url: str, path: str, is_openai_compat: bool, query: str) -> str:
-    target = "/" + path
+    # Normalize away '..'/'.' segments so a crafted path cannot escape the
+    # credentialed base URL (e.g. '../../admin/secret').
+    target = posixpath.normpath("/" + path)
+    if target != "/" and path.endswith("/"):
+        target += "/"
     # OpenAI-compatible base URLs already include the /v1 prefix; avoid /v1/v1/...
     if is_openai_compat and (target == "/v1" or target.startswith("/v1/")):
         target = target[3:]
@@ -147,17 +174,22 @@ async def proxy_all(path: str, request: Request):
 
     body = b""
     request_stream = None
+    body_uninspected = False
     if has_body and json_content and (bounded or messages_endpoint):
         # Native Messages bodies must be inspected regardless of size so they
         # can use the same context-compression path as chat completions.
         body = await request.body()
     elif has_body:
-        # Large or unbounded body: stream it through without buffering.
+        # Large, chunked, or non-JSON body: stream it through without
+        # buffering — the model field cannot be inspected.
         request_stream = request.stream()
+        body_uninspected = True
 
-    resolved = _resolve_route(request, body, settings)
-    if isinstance(resolved, tuple) and resolved and resolved[0] == "denied":
-        return _denied_response(resolved[1])
+    resolved = _resolve_route(request, body, body_uninspected, settings)
+    if isinstance(resolved, _Denied):
+        if request_stream is not None:
+            await request_stream.aclose()
+        return _denied_response(resolved.exc)
     if resolved is None:
         if request_stream is not None:
             await request_stream.aclose()
@@ -213,7 +245,7 @@ async def proxy_all(path: str, request: Request):
         and isinstance(payload.get("messages"), list)
     ):
         model = payload.get("model") if isinstance(payload.get("model"), str) else ""
-        compression_result = compress_request_messages(state, payload, model, logger)
+        compression_result = await compress_request_messages(state, payload, model, logger)
 
     if payload is not None:
         body = json.dumps(payload).encode()
@@ -243,8 +275,6 @@ async def proxy_all(path: str, request: Request):
             {"error": {"message": f"Upstream request failed: {exc}", "type": "upstream_error"}},
             status_code=502,
         )
-
-    state.metrics.observe_request(provider, upstream.status_code, time.perf_counter() - started)
 
     error_preview = bytearray()
 
@@ -280,6 +310,7 @@ async def proxy_all(path: str, request: Request):
                     request_id or "-",
                     preview,
                 )
+            state.metrics.observe_request(provider, upstream.status_code, time.perf_counter() - started)
             # Also closes the upstream cleanly if the client disconnects mid-stream.
             await upstream.aclose()
 
@@ -299,7 +330,11 @@ async def proxy_all(path: str, request: Request):
         background=None,
     )
     # Assign raw headers so repeated fields (e.g. Set-Cookie) stay distinct.
-    response.raw_headers = [
-        (k.encode("latin-1"), v.encode("latin-1")) for k, v in passthrough_headers
-    ]
+    raw_headers = []
+    for k, v in passthrough_headers:
+        try:
+            raw_headers.append((k.encode("latin-1"), v.encode("latin-1")))
+        except UnicodeEncodeError:
+            logger.warning("dropping non-latin-1 upstream header %r", k)
+    response.raw_headers = raw_headers
     return response

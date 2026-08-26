@@ -9,6 +9,7 @@ The API sends/accepts env-var names, never secret values (INV-5).
 from __future__ import annotations
 
 import asyncio
+import secrets
 import subprocess
 import time
 from pathlib import Path
@@ -22,13 +23,19 @@ from config import ConfigError
 router = APIRouter()
 
 HEALTH_CACHE_TTL_SECONDS = 30.0
+_health_cache_lock = asyncio.Lock()
+
+_build_id_cache: str | None = None
 
 
 async def require_admin_key(request: Request) -> None:
     """INV-9: the admin surface is for admin keys only, enforced in one place."""
     settings = request.app.state.settings
     token = getattr(request.state, "gateway_key", None)
-    if token is None or token not in settings.api_keys:
+    is_admin = token is not None and any(
+        secrets.compare_digest(token, key) for key in settings.api_keys
+    )
+    if not is_admin:
         raise HTTPException(
             status_code=403,
             detail={"error": "admin key required",
@@ -48,7 +55,10 @@ def _store(request: Request):
 
 def _reject_secrets(data: dict) -> list[str]:
     errors = []
-    for k in data.get("keys", []):
+    keys = data.get("keys", []) if isinstance(data, dict) else []
+    if not isinstance(keys, list):
+        keys = []
+    for k in keys:
         if isinstance(k, dict) and k.get("api_key"):
             errors.append(
                 f"key '{k.get('name', '?')}': secret 'api_key' values are not accepted; "
@@ -72,13 +82,16 @@ async def help_page():
 
 
 def _build_id() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=Path(__file__).resolve().parent.parent, text=True,
-        ).strip() or "dev"
-    except Exception:
-        return "dev"
+    global _build_id_cache
+    if _build_id_cache is None:
+        try:
+            _build_id_cache = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=Path(__file__).resolve().parent.parent, text=True,
+            ).strip() or "dev"
+        except Exception:
+            _build_id_cache = "dev"
+    return _build_id_cache
 
 
 @router.get("/admin/config", dependencies=ADMIN)
@@ -103,7 +116,7 @@ async def apply_config(request: Request):
     if errors:
         return JSONResponse({"detail": {"errors": errors}}, status_code=400)
     try:
-        await store.apply_async(data)
+        _, generated = await store.apply_async(data)
     except ConfigError as exc:
         return JSONResponse({"detail": {"errors": [str(exc)]}}, status_code=400)
     except OSError as exc:
@@ -117,7 +130,7 @@ async def apply_config(request: Request):
             status_code=500,
         )
     return {"applied": True, "migrated_keys": sorted(store.migrated_keys),
-            "generated": store.pop_generated()}
+            "generated": generated}
 
 
 @router.get("/admin/log", dependencies=ADMIN)
@@ -135,31 +148,45 @@ async def provider_health(request: Request):
     if cache is not None and now - cache["checked_at"] < HEALTH_CACHE_TTL_SECONDS:
         return cache["body"]
 
-    providers = []
-    client: httpx.AsyncClient = state.http_client
-    for name in sorted(settings.custom_providers):
-        info = settings.custom_providers[name]
-        reachable, detail = await _probe(client, info.base_url, info.type, info.api_key)
-        providers.append({"name": name, "type": info.type, "base_url": info.base_url,
-                          "reachable": reachable, "detail": detail})
+    async with _health_cache_lock:
+        # Re-check: another request may have refreshed the cache while we
+        # waited for the lock.
+        cache = getattr(state, "_provider_health_cache", None)
+        now = time.time()
+        if cache is not None and now - cache["checked_at"] < HEALTH_CACHE_TTL_SECONDS:
+            return cache["body"]
 
-    body = {"checked_at": now, "providers": providers}
-    state._provider_health_cache = {"checked_at": now, "body": body}
-    return body
+        providers = []
+        client: httpx.AsyncClient = state.http_client
+        for name in sorted(settings.custom_providers):
+            info = settings.custom_providers[name]
+            reachable, detail = await _probe(client, info.base_url, info.type, info.api_key)
+            providers.append({"name": name, "type": info.type, "base_url": info.base_url,
+                              "reachable": reachable, "detail": detail})
+
+        body = {"checked_at": now, "providers": providers}
+        state._provider_health_cache = {"checked_at": now, "body": body}
+        return body
 
 
 async def _probe(client: httpx.AsyncClient, base_url: str, ptype: str, api_key: str):
     """Cheap reachability probe per provider type; never raises."""
+    base = base_url.rstrip("/")
     headers = {}
-    if api_key:
-        if ptype == "anthropic":
+    if ptype == "anthropic":
+        url = f"{base}/v1/models"
+        if api_key:
             headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-        elif ptype == "gemini":
+    elif ptype == "gemini":
+        url = f"{base}/v1beta/models"
+        if api_key:
             headers = {"x-goog-api-key": api_key}
-        else:
+    else:
+        url = f"{base}/models"
+        if api_key:
             headers = {"authorization": f"Bearer {api_key}"}
     try:
-        r = await client.get(base_url.rstrip("/") + "/models", headers=headers)
+        r = await client.get(url, headers=headers)
         # 401/403 still proves reachability; only transport errors don't.
         return True, f"HTTP {r.status_code}"
     except Exception as exc:

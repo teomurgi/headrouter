@@ -492,7 +492,10 @@ class Settings:
         source = get("GATEWAY_PROVIDERS_FILE") or get("GATEWAY_PROVIDERS")
         if source and source.strip():
             custom, key_bindings = load_config_v2(source, env=env)
-            providers_source = source.strip() if source.strip().endswith(".json") or "/" in source.strip() else ""
+            stripped = source.strip()
+            # Mirror _load_json's own sniffing: inline JSON starts with '[' or
+            # '{' and has no backing file to persist admin edits to.
+            providers_source = "" if stripped.startswith("[") or stripped.startswith("{") else stripped
         else:
             providers_source = ""
 
@@ -507,18 +510,32 @@ class Settings:
                 f"{sorted(COMPRESSION_STRATEGIES)}"
             )
 
+        def get_int(key: str, default: int) -> int:
+            raw = get(key, str(default)) or str(default)
+            try:
+                return int(raw)
+            except ValueError:
+                raise ConfigError(f"invalid {key} {raw!r}; expected an integer") from None
+
+        def get_float(key: str, default: float) -> float:
+            raw = get(key, str(default)) or str(default)
+            try:
+                return float(raw)
+            except ValueError:
+                raise ConfigError(f"invalid {key} {raw!r}; expected a number") from None
+
         return cls(
             host=get("HOST", "0.0.0.0"),
-            port=int(get("PORT", "8000") or 8000),
+            port=get_int("PORT", 8000),
             api_keys=api_keys_set,
             routes=_parse_routes(get("GATEWAY_ROUTES")),
             default_route=default_route,
             compression_enabled=get("COMPRESSION_ENABLED", "1") not in ("0", "false", "False"),
-            compression_threshold_tokens=int(get("COMPRESSION_THRESHOLD_TOKENS", "0") or 0),
+            compression_threshold_tokens=get_int("COMPRESSION_THRESHOLD_TOKENS", 0),
             compression_strategy=compression_strategy,
             compression_prefetch_enabled=get("COMPRESSION_PREFETCH_ENABLED", "1")
             not in ("0", "false", "False"),
-            request_timeout_seconds=float(get("REQUEST_TIMEOUT_SECONDS", "300") or 300),
+            request_timeout_seconds=get_float("REQUEST_TIMEOUT_SECONDS", 300.0),
             provider_base_urls=base_urls,
             provider_api_keys=api_keys,
             custom_providers=custom,

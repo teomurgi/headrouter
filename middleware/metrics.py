@@ -65,7 +65,8 @@ class Metrics:
             "# HELP gateway_requests_total Total chat completion requests.",
             "# TYPE gateway_requests_total counter",
         ]
-        for (provider, status), n in sorted(self.requests.items()):
+        for key, n in snap["requests_by_provider_status"].items():
+            provider, status = key.rsplit(":", 1)
             lines.append(
                 f'gateway_requests_total{{provider="{_escape_label(provider)}",'
                 f'status="{_escape_label(status)}"}} {n}'

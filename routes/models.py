@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-import httpx
 from fastapi import APIRouter, Request
 
 from adapters import get_adapter
@@ -30,11 +29,7 @@ async def list_models(request: Request):
         adapter_cache = getattr(state, "adapter_cache", None)
         if adapter_cache is None:
             adapter_cache = state.adapter_cache = {}
-        client = getattr(state, "http_client", None)
-        if client is None:
-            client = state.http_client = httpx.AsyncClient(
-                timeout=settings.request_timeout_seconds
-            )
+        client = state.http_client
         for provider in wildcard:
             try:
                 adapter = get_adapter(provider, settings, adapter_cache)

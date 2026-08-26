@@ -35,7 +35,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         api_keys = self._effective_keys()
-        if api_keys and request.url.path not in PUBLIC_PATHS:
+        path = request.url.path
+        if len(path) > 1 and path.endswith("/"):
+            path = path.rstrip("/") or "/"
+        if api_keys and path not in PUBLIC_PATHS:
             token = self._extract_token(request)
             if token is None or not _key_matches(token, api_keys):
                 logger.warning(

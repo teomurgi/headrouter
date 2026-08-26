@@ -56,11 +56,11 @@ def _anthropic_response():
 
 async def _anthropic_stream():
     events = [
-        ("message_start", {"type": "message_start", "message": {"role": "assistant"}}),
+        ("message_start", {"type": "message_start", "message": {"role": "assistant", "usage": {"input_tokens": 8, "output_tokens": 0}}}),
         ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
         ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hi"}}),
         ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": " there"}}),
-        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}),
+        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 4}}),
         ("message_stop", {"type": "message_stop"}),
     ]
     for event, obj in events:

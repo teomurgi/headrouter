@@ -91,7 +91,7 @@ def test_anthropic_messages_uses_shared_compression(captured, caplog):
         def __init__(self):
             self.calls = []
 
-        def maybe_compress(self, messages, model):
+        async def maybe_compress(self, messages, model):
             self.calls.append((messages, model))
             return CompressionResult(
                 messages=compressed_messages,

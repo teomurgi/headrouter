@@ -70,7 +70,34 @@ def _user_blocks(content: Any) -> Any:
                         "source": {"type": "base64", "media_type": media_type, "data": data},
                     }
                 )
+            elif url:
+                blocks.append({"type": "image", "source": {"type": "url", "url": url}})
     return blocks or ""
+
+
+def _usage_chunk(chunk_id: str, created: int, model: str, usage: dict) -> bytes:
+    """A trailing OpenAI-style chunk carrying token usage, sent just before [DONE]."""
+    prompt_tokens = usage.get("input_tokens", 0)
+    completion_tokens = usage.get("output_tokens", 0)
+    return (
+        "data: "
+        + json.dumps(
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+            },
+            separators=(",", ":"),
+        )
+        + "\n\n"
+    ).encode()
 
 
 def to_anthropic_request(body: dict) -> dict:
@@ -134,7 +161,11 @@ def to_anthropic_request(body: dict) -> dict:
     payload: dict[str, Any] = {"model": body.get("model"), "messages": merged or [{"role": "user", "content": ""}]}
     if system_parts:
         payload["system"] = "\n\n".join(system_parts)
-    max_tokens = body.get("max_tokens") or body.get("max_completion_tokens") or 4096
+    max_tokens = body.get("max_tokens")
+    if max_tokens is None:
+        max_tokens = body.get("max_completion_tokens")
+    if max_tokens is None:
+        max_tokens = 4096
     payload["max_tokens"] = max_tokens
     if body.get("temperature") is not None:
         payload["temperature"] = body["temperature"]
@@ -167,9 +198,10 @@ def to_anthropic_request(body: dict) -> dict:
 
 def from_anthropic_response(resp: dict, model: str) -> dict:
     """Convert an Anthropic messages response to OpenAI chat.completion format."""
-    text_parts = [b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text"]
+    content = [b for b in resp.get("content", []) if isinstance(b, dict)]
+    text_parts = [b.get("text", "") for b in content if b.get("type") == "text"]
     tool_calls = []
-    for i, block in enumerate(resp.get("content", [])):
+    for i, block in enumerate(content):
         if block.get("type") == "tool_use":
             tool_calls.append(
                 {
@@ -251,6 +283,8 @@ class AnthropicAdapter(BaseAdapter):
             "POST", f"{self.base_url}/v1/messages", json=payload, headers=self._headers()
         )
         resp = await client.send(req, stream=True)
+        done = False
+        usage = {"input_tokens": 0, "output_tokens": 0}
         try:
             if resp.status_code >= 400:
                 text = (await resp.aread()).decode("utf-8", "replace")
@@ -264,6 +298,9 @@ class AnthropicAdapter(BaseAdapter):
                     continue
                 etype = obj.get("type") or event
                 if etype == "message_start":
+                    msg_usage = obj.get("message", {}).get("usage") or {}
+                    usage["input_tokens"] = msg_usage.get("input_tokens", 0)
+                    usage["output_tokens"] = msg_usage.get("output_tokens", 0)
                     yield chunk({"role": "assistant", "content": ""})
                 elif etype == "content_block_start":
                     block = obj.get("content_block", {})
@@ -298,10 +335,18 @@ class AnthropicAdapter(BaseAdapter):
                             }
                         )
                 elif etype == "message_delta":
+                    delta_usage = obj.get("usage") or {}
+                    if "output_tokens" in delta_usage:
+                        usage["output_tokens"] = delta_usage["output_tokens"]
                     stop = obj.get("delta", {}).get("stop_reason")
                     if stop:
                         yield chunk({}, STOP_REASONS.get(stop, "stop"))
                 elif etype == "message_stop":
+                    done = True
+                    yield _usage_chunk(chunk_id, created, model, usage)
                     yield b"data: [DONE]\n\n"
+            if not done:
+                yield _usage_chunk(chunk_id, created, model, usage)
+                yield b"data: [DONE]\n\n"
         finally:
             await resp.aclose()

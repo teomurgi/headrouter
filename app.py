@@ -44,6 +44,14 @@ def create_app(
             app.state.http_client = http_client
         if settings.compression_prefetch_enabled:
             await asyncio.to_thread(app.state.compression.prefetch)
+        if not settings.effective_api_keys():
+            logger.warning(
+                "SECURITY WARNING: no gateway API keys are configured — every "
+                "/v1/* request will be accepted without authentication "
+                "(host=%s). Set GATEWAY_API_KEYS or configure keys via the "
+                "admin UI before exposing this gateway beyond localhost.",
+                settings.host,
+            )
         logger.info(
             "headrouter ready: %d route(s), compression=%s strategy=%s",
             len(settings.routes),
