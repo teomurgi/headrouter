@@ -18,9 +18,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+tray = ["pystray>=0.19", "pillow>=10"]
+
+[project.scripts]
+headrouter-gateway = "gateway_launcher:main"
+headrouter-tray = "tray_app:main"
 
 [tool.setuptools]
-py-modules = ["app", "config", "config_store", "schemas", "compression_service", "request_log"]
+py-modules = ["app", "config", "config_store", "schemas", "compression_service", "request_log", "gateway_launcher", "tray_app"]
 
 [tool.setuptools.packages.find]
 include = ["adapters*", "middleware*", "routes*"]

@@ -144,6 +144,50 @@ docker run -p 8000:8000 \
 
 Or mount your `.env` and skip the `-e` flags: `-v "$PWD/.env:/app/.env"` (auto-loaded at startup).
 
+## Desktop app (tray + .deb / .app)
+
+Headrouter also ships as a **system-tray application**: a small always-on tray icon that manages the gateway as a child subprocess (start/stop/restart, open admin UI, open logs, greyed-out icon when stopped). The gateway is a self-contained frozen binary — no Python install required on the target machine.
+
+### Ubuntu (.deb)
+
+```bash
+bash packaging/ubuntu/build-deb.sh           # produces packaging/ubuntu/build/headrouter_0.1.0_arm64.deb
+sudo apt install ./packaging/ubuntu/build/headrouter_0.1.0_arm64.deb
+```
+
+Then launch "Headrouter" from the app grid (it also autostarts at login). **GNOME/Wayland requires the "AppIndicator and KStatusNotifierItem Support" extension** for the icon to appear: `sudo apt install gnome-shell-extension-appindicator`, then log out/in.
+
+### macOS (.app)
+
+See [packaging/macos/README.md](packaging/macos/README.md) — build with `bash packaging/macos/build-app.sh` on a Mac (uses the native pystray `_darwin` backend, `LSUIElement` menu-bar agent). Signing/notarization steps are documented there.
+
+### Desktop config: no `.env` is loaded
+
+The frozen gateway **does not read `.env` or the repo's `providers.json`**. Runtime config lives at:
+
+- **Providers/aliases/keys** → `$XDG_CONFIG_HOME/headrouter/providers.json` (default `~/.config/headrouter/providers.json`), seeded as `{"providers": [], "keys": []}` on first run. Edit via the admin UI (tray → Open admin UI) or replace the file and Restart.
+- **Environment variables** (`GATEWAY_API_KEYS`, `COMPRESSION_STRATEGY`, provider `api_key_env` credentials, …) must exist in the **desktop session environment** — the tray inherits it and passes it down to the gateway. Set them in `~/.profile` and log out/in, e.g.:
+
+  ```bash
+  export GATEWAY_API_KEYS=hr_...          # admin key for /admin
+  export OPENROUTER_API_KEY=sk-or-...     # any api_key_env credentials referenced in providers.json
+  # export COMPRESSION_STRATEGY=balanced  # optional; defaults: coding, enabled, threshold 0
+  ```
+
+  Quick one-off test without logout: `pkill -f headrouter; GATEWAY_API_KEYS=hr_... headrouter-tray &`
+- **Logs** → `$XDG_STATE_HOME/headrouter/gateway.log` (default `~/.local/state/headrouter/gateway.log`); tray → Open logs.
+
+### How the freeze works (for maintainers)
+
+Two separate PyInstaller binaries are built with **two different interpreters**:
+
+| Binary | Frozen with | Why |
+| --- | --- | --- |
+| `headrouter-gateway` | project `.venv` (Python 3.12) | bundles headroom-ai + onnxruntime |
+| `headrouter-tray` | system `python3` (3.14) venv | system `gi`/AyatanaAppIndicator3 typelibs are compiled for the 3.14 ABI and **cannot** be bundled; [packaging/tray_runtime_hook.py](packaging/tray_runtime_hook.py) prepends system dist-packages to `sys.path` so `import gi` resolves from the OS at runtime. Do **not** add `excludes=["gi"]` to tray.spec — that makes the frozen importer block it entirely. |
+
+Build specs: [packaging/gateway.spec](packaging/gateway.spec), [packaging/tray.spec](packaging/tray.spec) (run `pyinstaller` from `packaging/`). The `.deb` ships `providers.example.json` as a reference only — never a real `providers.json` (which holds secrets).
+
 ## Development
 
 ```bash

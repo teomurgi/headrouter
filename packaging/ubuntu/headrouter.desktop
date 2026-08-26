@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Headrouter
+Comment=Tray controller for the Headrouter LLM gateway
+Exec=/usr/bin/headrouter-tray
+Icon=headrouter
+Terminal=false
+Categories=Network;Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

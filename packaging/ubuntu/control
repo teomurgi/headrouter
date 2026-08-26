@@ -1,0 +1,16 @@
+Package: headrouter
+Version: 0.1.0
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Maintainer: teomurgi <you@example.com>
+Depends: python3-gi, gir1.2-ayatanaappindicator3-0.1, gir1.2-gtk-3.0, libayatana-appindicator3-1
+Description: Tray controller and gateway for the Headrouter LLM gateway
+ Headrouter is a stateless OpenAI-compatible LLM gateway with Headroom
+ context compression and multi-provider routing. This package installs a
+ system-tray controller (start/stop the gateway, open the admin UI) plus a
+ self-contained gateway server binary it manages.
+ .
+ The tray frontend uses AppIndicator and requires the GNOME "AppIndicator and
+ KStatusNotifierItem Support" shell extension (or a desktop with a native
+ indicator area) to be visible.

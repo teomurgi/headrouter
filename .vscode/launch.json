@@ -1,0 +1,59 @@
+{
+  // Debug/run configurations for the Headrouter gateway.
+  // Interpreter: the project .venv is selected automatically via python.defaultInterpreterPath
+  // (see .vscode/settings.json); each config also pins it explicitly.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Gateway (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:app", "--port", "8000", "--reload"],
+      "jinja": true,
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        // Load provider/key config from the repo file; override with a .env if present.
+        "GATEWAY_PROVIDERS_FILE": "${workspaceFolder}/providers.json"
+      }
+    },
+    {
+      "name": "Gateway (admin test key)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:app", "--port", "8001"],
+      "jinja": true,
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "env": {
+        "GATEWAY_PROVIDERS_FILE": "${workspaceFolder}/providers.json",
+        // Unlocks the admin surface (/admin) without a scoped team key.
+        "GATEWAY_API_KEYS": "admin-test-key"
+      }
+    },
+    {
+      "name": "Pytest: all",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["tests/", "-q"],
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python"
+    },
+    {
+      "name": "Pytest: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-q"],
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "python": "${workspaceFolder}/.venv/bin/python"
+    }
+  ]
+}
