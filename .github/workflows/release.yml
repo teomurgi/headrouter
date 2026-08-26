@@ -34,7 +34,11 @@ jobs:
             VERSION="$(grep -m1 '^version' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          # pyproject.toml requires a PEP 440 version; tags like "v1.2.3-rc1"
+          # aren't valid as-is, so any non-numeric suffix becomes a "+local"
+          # segment (e.g. "1.2.3-rc1" -> "1.2.3+rc1"), which PEP 440 allows.
+          PY_VERSION="${VERSION/-/+}"
+          perl -pi -e "s/^version = \".*\"/version = \"$PY_VERSION\"/" pyproject.toml
           perl -pi -e "s/(\"CFBundleShortVersionString\": )\".*\"/\$1\"$VERSION\"/" packaging/macos/tray_macos.spec
           perl -pi -e "s/(\"CFBundleVersion\": )\".*\"/\$1\"$VERSION\"/" packaging/macos/tray_macos.spec
 
@@ -89,7 +93,8 @@ jobs:
           else
             VERSION="$(grep -m1 '^version' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
           fi
-          perl -pi -e "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          PY_VERSION="${VERSION/-/+}"
+          perl -pi -e "s/^version = \".*\"/version = \"$PY_VERSION\"/" pyproject.toml
           perl -pi -e "s/^Version: .*/Version: $VERSION/" packaging/ubuntu/control
 
       - name: Build project venv
