@@ -286,6 +286,9 @@ async def proxy_all(path: str, request: Request):
                     error_preview.extend(chunk[:remaining])
                 yield chunk
         except Exception:
+            # Upstream dropped the connection mid-stream (e.g. httpcore.ReadError) or the
+            # client disconnected; the response already started, so just end it here
+            # instead of re-raising and surfacing an unhandled-exception traceback.
             logger.exception(
                 "proxy response stream failed method=%s path=%s provider=%s status=%s",
                 request.method,
@@ -293,7 +296,6 @@ async def proxy_all(path: str, request: Request):
                 provider,
                 upstream.status_code,
             )
-            raise
         finally:
             if upstream.status_code >= 400:
                 request_id = upstream.headers.get("x-request-id") or upstream.headers.get("request-id")

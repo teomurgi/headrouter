@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-27
+
+### Added
+
+- **Tray: single-instance detection** — the tray now checks (via a health
+  check plus a shared, per-port PID marker) whether a gateway is already
+  serving on its configured host:port before starting one, and attaches to
+  it instead of spawning a duplicate. Covers another tray instance's child
+  process as well as gateways started out-of-band. Stop/Restart can signal
+  an adopted process when its PID is known; the status menu reports
+  `running`, `running (external)`, or `running (unmanaged)` accordingly.
+
+### Fixed
+
+- **Proxy streaming** — no longer re-raises after a mid-stream upstream
+  disconnect (e.g. `httpcore.ReadError`) or client disconnect; the response
+  has already started, so the stream now just ends instead of surfacing an
+  unhandled-exception traceback.
+
 ## [0.1.0] - 2026-08-27
 
 First public release.
@@ -39,4 +58,5 @@ First public release.
 - **Test suite** — 145 tests covering adapters, alias routing, admin API,
   compression, proxying, SSE, and adversarial UI cases.
 
+[0.2.0]: https://github.com/teomurgi/headrouter/releases/tag/v0.2.0
 [0.1.0]: https://github.com/teomurgi/headrouter/releases/tag/v0.1.0

@@ -6,6 +6,7 @@ providers.json
 .pytest_cache/
 *.egg-info/
 build/
+.DS_Store
 
 # PyInstaller / packaging build artifacts
 packaging/build/

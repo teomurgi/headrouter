@@ -97,6 +97,34 @@ def _greyed(img: Image.Image) -> Image.Image:
     return Image.merge("RGBA", (r, g, b, a))
 
 
+def _pid_file(port: int) -> Path:
+    """Shared, per-port marker so any tray instance can find a running gateway."""
+    return _state_dir / f"gateway-{port}.pid"
+
+
+def _read_pid(path: Path) -> int | None:
+    try:
+        return int(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _health_check(url: str, timeout: float = 1.0) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
 class GatewayTray:
     def __init__(self, host: str, port: int, launch_cmd: list[str], autostart: bool):
         self.host = host
@@ -104,6 +132,11 @@ class GatewayTray:
         self.launch_cmd = launch_cmd
         self.autostart = autostart
         self.proc: subprocess.Popen | None = None
+        # PID of a gateway we've adopted rather than spawned (another tray
+        # instance's child, or -1 if something answers the port but with no
+        # known/matching PID, e.g. started outside any tray).
+        self.external_pid: int | None = None
+        self.pid_file = _pid_file(port)
         self._lock = threading.Lock()
         self._log_fh = None
         self._icon_running = _load_icon(ICON_PATH)
@@ -120,11 +153,46 @@ class GatewayTray:
         return f"http://127.0.0.1:{self.port}"
 
     def is_running(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None
+        if self.proc is not None:
+            return self.proc.poll() is None
+        if self.external_pid is not None:
+            if self.external_pid > 0:
+                if _pid_alive(self.external_pid):
+                    return True
+                self.external_pid = None
+                return False
+            # Unknown PID: fall back to asking the port directly.
+            return _health_check(self.base_url + HEALTH_PATH, timeout=0.5)
+        return False
+
+    def _can_control(self) -> bool:
+        """Whether we hold a PID we're allowed to signal (owned or adopted)."""
+        return self.proc is not None or (self.external_pid is not None and self.external_pid > 0)
+
+    def _detect_existing(self) -> int | None:
+        """Look for a gateway already serving on our host:port.
+
+        Returns its PID if known (shared PID file, still alive), -1 if one
+        answers but its PID is unknown/unmanaged, or None if nothing is
+        listening there.
+        """
+        if not _health_check(self.base_url + HEALTH_PATH, timeout=0.75):
+            return None
+        pid = _read_pid(self.pid_file)
+        if pid is not None and _pid_alive(pid):
+            return pid
+        return -1
 
     def start(self) -> None:
         with self._lock:
             if self.is_running():
+                return
+            existing = self._detect_existing()
+            if existing is not None:
+                # Another instance (or an out-of-band process) already owns
+                # this port — attach to it instead of spawning a duplicate.
+                self.external_pid = existing
+                self._refresh()
                 return
             self._log_fh = open(LOG_FILE, "ab", buffering=0)
             env = dict(os.environ)
@@ -145,25 +213,55 @@ class GatewayTray:
                 self.icon.title = f"{APP_NAME}: failed to start ({exc})"
                 return
             proc = self.proc
+            try:
+                self.pid_file.write_text(str(proc.pid), encoding="utf-8")
+            except OSError:
+                pass
         threading.Thread(target=self._watch, args=(proc,), daemon=True).start()
         self._refresh()
 
+    def _clear_pid_file(self, pid: int) -> None:
+        if _read_pid(self.pid_file) == pid:
+            try:
+                self.pid_file.unlink()
+            except OSError:
+                pass
+
     def stop(self) -> None:
         with self._lock:
-            if not self.is_running():
-                return
-            try:
-                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-                self.proc.wait(timeout=8)
-            except Exception:
+            if self.proc is not None:
+                pid = self.proc.pid
                 try:
-                    os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                    self.proc.wait(timeout=8)
                 except Exception:
+                    try:
+                        os.killpg(os.getpgid(pid), signal.SIGKILL)
+                    except Exception:
+                        pass
+                self.proc = None
+                self._clear_pid_file(pid)
+                if self._log_fh:
+                    self._log_fh.close()
+                    self._log_fh = None
+            elif self.external_pid is not None and self.external_pid > 0:
+                pid = self.external_pid
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    for _ in range(40):  # up to ~8s
+                        if not _pid_alive(pid):
+                            break
+                        time.sleep(0.2)
+                    else:
+                        os.kill(pid, signal.SIGKILL)
+                except OSError:
                     pass
-            self.proc = None
-            if self._log_fh:
-                self._log_fh.close()
-                self._log_fh = None
+                self.external_pid = None
+                self._clear_pid_file(pid)
+            else:
+                # Something is listening but we don't own/recognize its PID
+                # (started outside any tray) — nothing safe to signal.
+                return
         self._refresh()
 
     def restart(self) -> None:
@@ -177,12 +275,17 @@ class GatewayTray:
         with self._lock:
             if proc is self.proc:  # not superseded by a restart
                 self.proc = None
+                self._clear_pid_file(proc.pid)
         self._refresh()
 
     # ----- menu ---------------------------------------------------------------
     def _status(self) -> str:
         if self.is_running():
-            return f"{APP_NAME}: running on :{self.port}"
+            if self.proc is not None or (self.external_pid and self.external_pid > 0):
+                suffix = "" if self.proc is not None else " (external)"
+            else:
+                suffix = " (unmanaged)"
+            return f"{APP_NAME}: running on :{self.port}{suffix}"
         return f"{APP_NAME}: stopped"
 
     def _refresh(self) -> None:
@@ -222,11 +325,11 @@ class GatewayTray:
             ),
             MenuItem(
                 "Stop", lambda _i, _it: self.stop(),
-                enabled=lambda _i: self.is_running(),
+                enabled=lambda _i: self.is_running() and self._can_control(),
             ),
             MenuItem(
                 "Restart", lambda _i, _it: self.restart(),
-                enabled=lambda _i: self.is_running(),
+                enabled=lambda _i: self.is_running() and self._can_control(),
             ),
             pystray.Menu.SEPARATOR,
             MenuItem("Quit", self._quit),
