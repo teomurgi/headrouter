@@ -104,6 +104,38 @@ the dashboard shows cumulative compression savings, or scrape `/metrics`.
 
 ## Quick start
 
+The easiest way to run Headrouter is to **download a prebuilt package from
+[Releases](https://github.com/teomurgi/headrouter/releases)** — no Python, no
+build step, no terminal required beyond the install itself:
+
+- **macOS** — download `Headrouter-*-macos-arm64.zip` (Apple Silicon) or
+  `Headrouter-*-macos-intel.zip` (Intel), unzip, and drag **Headrouter.app**
+  into Applications. Launch it to get a menu-bar icon that manages the gateway
+  for you.
+- **Ubuntu / Debian** — download the `.deb` for your architecture
+  (`headrouter_*_amd64.deb` or `headrouter_*_arm64.deb`) and install it:
+  ```bash
+  sudo apt install ./headrouter_*_amd64.deb
+  ```
+- **Fedora / RHEL / openSUSE** — download the `.rpm` for your architecture
+  (`headrouter-*-*.x86_64.rpm` or `headrouter-*-*.aarch64.rpm`) and install it:
+  ```bash
+  sudo dnf install ./headrouter-*-*.x86_64.rpm
+  ```
+
+Once installed, launch **Headrouter** from your app grid / menu bar (it also
+autostarts at login). The tray icon lets you start/stop the gateway, open the
+admin UI, and view logs. Then point any OpenAI client at
+`http://localhost:8000/v1`.
+
+> **GNOME/Wayland:** install the "AppIndicator and KStatusNotifierItem Support"
+> extension for the tray icon to appear:
+> `sudo apt install gnome-shell-extension-appindicator`, then log out/in.
+
+### Run from source (for developers)
+
+Prefer to hack on it or run the gateway directly? Install into a venv:
+
 ```bash
 python -m venv .venv && .venv/bin/pip install -e .
 
@@ -236,9 +268,11 @@ docker run -p 8000:8000 \
 
 Or mount your `.env` and skip the `-e` flags: `-v "$PWD/.env:/app/.env"` (auto-loaded at startup).
 
-## Desktop app (tray + .deb / .app)
+## Desktop app (tray + .deb / .rpm / .app)
 
 Headrouter also ships as a **system-tray application**: a small always-on tray icon that manages the gateway as a child subprocess (start/stop/restart, open admin UI, open logs, greyed-out icon when stopped). The gateway is a self-contained frozen binary — no Python install required on the target machine.
+
+The recommended way to get it is from [Releases](https://github.com/teomurgi/headrouter/releases) (see [Quick start](#quick-start)). The sections below cover **building the packages yourself** from source.
 
 ### Ubuntu (.deb)
 
@@ -248,6 +282,13 @@ sudo apt install ./packaging/ubuntu/build/headrouter_0.1.0_arm64.deb
 ```
 
 Then launch "Headrouter" from the app grid (it also autostarts at login). **GNOME/Wayland requires the "AppIndicator and KStatusNotifierItem Support" extension** for the icon to appear: `sudo apt install gnome-shell-extension-appindicator`, then log out/in.
+
+### Fedora / RHEL (.rpm)
+
+```bash
+bash packaging/fedora/build-rpm.sh           # produces packaging/fedora/build/headrouter-*.rpm
+sudo dnf install ./packaging/fedora/build/headrouter-*.rpm
+```
 
 ### macOS (.app)
 
