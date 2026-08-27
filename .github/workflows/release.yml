@@ -85,18 +85,19 @@ jobs:
       - name: Zip .app bundle
         run: |
           cd packaging/dist
-          ditto -c -k --sequesterRsrc --keepParent HeadrouterTray.app "HeadrouterTray-${VERSION}-macos-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent Headrouter.app "Headrouter-${VERSION}-macos-${{ matrix.arch }}.zip"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: packaging/dist/HeadrouterTray-*-macos-*.zip
+          files: packaging/dist/Headrouter-*-macos-*.zip
 
   linux:
     needs: create-release
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
+        pkg: [deb, rpm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

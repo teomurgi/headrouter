@@ -1,6 +1,6 @@
 # Headrouter on macOS
 
-The macOS build produces a `HeadrouterTray.app` menu-bar bundle that manages the
+The macOS build produces a `Headrouter.app` menu-bar bundle that manages the
 gateway as a subprocess.
 
 ## How it differs from Linux
@@ -23,7 +23,7 @@ Run on macOS (cannot be cross-built from Linux):
 ./packaging/macos/build-app.sh
 ```
 
-Output: `packaging/dist/HeadrouterTray.app`
+Output: `packaging/dist/Headrouter.app`
 
 ## Icon
 
@@ -43,13 +43,13 @@ For distribution outside Gatekeeper, sign with a Developer ID and notarize:
 ```sh
 codesign --deep --force --options runtime \
   --sign "Developer ID Application: Your Name (TEAMID)" \
-  packaging/dist/HeadrouterTray.app
+  packaging/dist/Headrouter.app
 
 # package into a dmg/zip, then:
-xcrun notarytool submit HeadrouterTray.zip \
+xcrun notarytool submit Headrouter.zip \
   --apple-id you@example.com --team-id TEAMID --password app-specific-password \
   --wait
-xcrun stapler staple packaging/dist/HeadrouterTray.app
+xcrun stapler staple packaging/dist/Headrouter.app
 ```
 
 See the commented section at the bottom of `build-app.sh`.

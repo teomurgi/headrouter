@@ -3,7 +3,7 @@
 #
 #   ./packaging/macos/build-app.sh
 #
-# Produces: packaging/dist/HeadrouterTray.app
+# Produces: packaging/dist/Headrouter.app
 #
 # Steps:
 #   1. Freeze the gateway binary (self-contained) with the project interpreter.
@@ -47,7 +47,7 @@ echo ">> freezing tray .app bundle"
 "$TRAY_VENV/bin/pyinstaller" --noconfirm --clean macos/tray_macos.spec >/dev/null
 cd "$ROOT"
 
-APP="$ROOT/packaging/dist/HeadrouterTray.app"
+APP="$ROOT/packaging/dist/Headrouter.app"
 echo ""
 echo "Built: $APP"
 

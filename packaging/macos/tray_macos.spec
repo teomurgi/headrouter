@@ -6,7 +6,7 @@
 #   python3 -m venv /tmp/tray-venv
 #   /tmp/tray-venv/bin/pip install pystray pillow pyobjc pyinstaller
 #   cd packaging && /tmp/tray-venv/bin/pyinstaller --noconfirm --clean macos/tray_macos.spec
-# Output: packaging/dist/HeadrouterTray.app
+# Output: packaging/dist/Headrouter.app
 #
 # The bundle embeds the frozen headrouter-gateway binary as a resource; the
 # tray's _resolve_launch finds it next to the executable inside the bundle.
@@ -72,7 +72,7 @@ coll = COLLECT(
 )
 app = BUNDLE(
     coll,
-    name="HeadrouterTray.app",
+    name="Headrouter.app",
     icon=os.path.join(ROOT, "packaging", "macos", "icon.icns"),
     bundle_identifier="dev.headrouter.tray",
     info_plist={
