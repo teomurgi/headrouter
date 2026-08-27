@@ -37,6 +37,7 @@
     background:linear-gradient(90deg,#fff,#a9c3f5);
     -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
   }
+  header .logo { width:26px; height:26px; display:block; }
   nav.top { display:flex; gap:2px; background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:3px; }
   nav.top button {
     font:inherit; font-size:12.5px; background:none; color:var(--muted); border:1px solid transparent;
@@ -158,6 +159,7 @@
 </head>
 <body>
 <header>
+  <img class="logo" src="/static/icon.png" alt="Headrouter logo">
   <h1>HEADROUTER</h1>
   <nav class="top" aria-label="Pages">
     <button id="tab-dashboard" aria-selected="true">Dashboard</button>

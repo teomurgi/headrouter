@@ -16,11 +16,13 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from config import ConfigError
 
 router = APIRouter()
+
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 HEALTH_CACHE_TTL_SECONDS = 30.0
 _health_cache_lock = asyncio.Lock()
@@ -70,15 +72,24 @@ def _reject_secrets(data: dict) -> list[str]:
 @router.get("/admin", include_in_schema=False)
 async def admin_page():
     build = _build_id()
-    html = (Path(__file__).resolve().parent.parent / "static" / "admin.html").read_text(encoding="utf-8")
+    html = (STATIC_DIR / "admin.html").read_text(encoding="utf-8")
     html = html.replace(">build ?</span>", f">{build}</span>")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/help", include_in_schema=False)
 async def help_page():
-    html = (Path(__file__).resolve().parent.parent / "static" / "help.html").read_text(encoding="utf-8")
+    html = (STATIC_DIR / "help.html").read_text(encoding="utf-8")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/static/{filename}", include_in_schema=False)
+async def static_file(filename: str):
+    """Serve bundled static assets (icons etc.) with a long cache lifetime."""
+    path = (STATIC_DIR / filename).resolve()
+    if not path.is_file() or path.parent != STATIC_DIR:
+        raise HTTPException(status_code=404, detail={"error": "not found"})
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
 
 def _build_id() -> str:
@@ -87,7 +98,7 @@ def _build_id() -> str:
         try:
             _build_id_cache = subprocess.check_output(
                 ["git", "rev-parse", "--short", "HEAD"],
-                cwd=Path(__file__).resolve().parent.parent, text=True,
+                cwd=STATIC_DIR.parent, text=True,
             ).strip() or "dev"
         except Exception:
             _build_id_cache = "dev"

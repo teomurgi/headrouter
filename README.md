@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="static/icon.png" alt="Headrouter logo" width="128">
+</p>
+
 # Headrouter
 
 **Your LLM traffic, minus the tokens you didn't need.**
