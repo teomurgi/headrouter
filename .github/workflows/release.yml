@@ -76,6 +76,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          # PyInstaller freezes torch/onnxruntime/headroom-ai into the gateway
+          # binary, which needs more free space than ships on the runner by
+          # default; reclaim space by dropping preinstalled toolchains we
+          # don't use for this build.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          df -h /
+
       - name: Install system tray dependencies
         run: |
           sudo apt-get update
