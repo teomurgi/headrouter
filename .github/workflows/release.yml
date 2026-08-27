@@ -10,7 +10,33 @@ permissions:
   contents: write
 
 jobs:
+  # Create (or reuse) the GitHub Release for the tag exactly once, before any
+  # matrix job tries to upload assets. Without this, concurrent matrix jobs
+  # race to create the same release and one of them fails with
+  # "422 Validation Failed" during the asset-upload step.
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version for dispatch runs
+        id: version
+        run: echo "version=$(grep -m1 '^version' pyproject.toml | sed -E 's/version = \"(.*)\"/\1/')" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # On tag pushes the tag is inferred from the ref; on manual
+          # workflow_dispatch runs there is no tag, so fall back to the
+          # version in pyproject.toml (prefixed with "v").
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.version.outputs.version) }}
+
   macos:
+    needs: create-release
     strategy:
       matrix:
         include:
@@ -66,9 +92,11 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
           files: packaging/dist/HeadrouterTray-*-macos-*.zip
 
   linux:
+    needs: create-release
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
@@ -119,4 +147,5 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
           files: packaging/ubuntu/build/*.deb
