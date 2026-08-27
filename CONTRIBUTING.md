@@ -18,7 +18,7 @@ that keep it that way are the most welcome.
 
 ```bash
 git clone https://github.com/teomurgi/headrouter.git
-cd hydraroom
+cd headroom
 python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 ```
