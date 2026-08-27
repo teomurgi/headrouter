@@ -16,8 +16,6 @@ jobs:
   # "422 Validation Failed" during the asset-upload step.
   create-release:
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.release.outputs.upload_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -92,7 +90,6 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
           files: packaging/dist/HeadrouterTray-*-macos-*.zip
 
   linux:
@@ -139,6 +136,12 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/pip install --upgrade pip
+          # On aarch64 PyPI serves the CUDA-bundled torch wheel (pulls in ~50
+          # nvidia_* packages), which PyInstaller then freezes into the gateway
+          # binary and pushes the .deb past GitHub's 2 GB release-asset limit.
+          # This gateway does CPU-only inference, so install the CPU-only torch
+          # wheel first; pip then keeps it when resolving headroom-ai[ml].
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
           .venv/bin/pip install -e . pyinstaller
 
       - name: Build .deb package
@@ -147,5 +150,4 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
           files: packaging/ubuntu/build/*.deb
