@@ -40,6 +40,26 @@ HELP_PATH = "/help"
 _state_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "headrouter"
 _state_dir.mkdir(parents=True, exist_ok=True)
 LOG_FILE = _state_dir / "gateway.log"
+ENV_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "headrouter" / ".env"
+
+_ENV_TEMPLATE = """\
+# Headrouter environment overrides.
+# Uncomment and edit, then use tray → Restart.
+# GATEWAY_API_KEYS=hr_...
+# OPENROUTER_API_KEY=sk-or-...
+"""
+
+
+def _ensure_env_file() -> None:
+    """Create the per-user .env (0600, commented template) if it doesn't exist."""
+    if ENV_FILE.exists():
+        return
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ENV_FILE.touch(mode=0o600)
+    os.chmod(ENV_FILE, 0o600)
+    ENV_FILE.write_text(_ENV_TEMPLATE, encoding="utf-8")
+
+
 def _resource_base() -> Path:
     """Directory that bundled data files (icon) live in.
 
@@ -190,6 +210,10 @@ class GatewayTray:
             MenuItem(
                 "Open logs",
                 lambda _i, _it: webbrowser.open(LOG_FILE.as_uri()),
+            ),
+            MenuItem(
+                "Edit environment",
+                lambda _i, _it: (_ensure_env_file(), webbrowser.open(ENV_FILE.as_uri())),
             ),
             pystray.Menu.SEPARATOR,
             MenuItem(

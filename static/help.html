@@ -82,7 +82,7 @@
   <tr><td><code>GATEWAY_PROVIDERS</code></td><td><em>empty</em></td><td>Inline JSON alternative to the file above.</td></tr>
   <tr><td><code>GATEWAY_ROUTES</code></td><td><em>empty</em></td><td><code>alias=provider:model,...</code> env-based routing (admin keys only, no JSON needed).</td></tr>
   <tr><td><code>GATEWAY_DEFAULT_ROUTE</code></td><td><em>empty</em></td><td><code>provider:model</code> fallback for unrouted models (admin keys).</td></tr>
-  <tr><td><code>GATEWAY_ENV_FILE</code></td><td><code>.env</code></td><td>Env file auto-loaded <em>only when running from source</em>. Not read by the frozen desktop app.</td></tr>
+  <tr><td><code>GATEWAY_ENV_FILE</code></td><td><code>.env</code></td><td>Env file auto-loaded when running from source. The frozen desktop app instead always loads the fixed per-user <code>~/.config/headrouter/.env</code>.</td></tr>
   <tr><td><code>COMPRESSION_ENABLED</code></td><td><code>1</code></td><td>Enable headroom compression. Set <code>0</code> to disable.</td></tr>
   <tr><td><code>COMPRESSION_THRESHOLD_TOKENS</code></td><td><code>0</code></td><td>Compress only when input exceeds this token budget; <code>0</code> = always compress.</td></tr>
   <tr><td><code>COMPRESSION_STRATEGY</code></td><td><code>coding</code></td><td>Headroom profile: <code>coding</code> (recommended), <code>balanced</code>, <code>general</code>, <code>agent-90</code> (aggressive), <code>default</code> (legacy router).</td></tr>
@@ -100,7 +100,7 @@
 <h2 id="desktop">Desktop / tray install</h2>
 <p>When installed from the <code>.deb</code> / <code>.app</code> and launched from the tray icon, the gateway runs as a <strong>frozen binary</strong> with a crucial difference:</p>
 <div class="card">
-  <div class="card-t">The desktop app does NOT read any .env file</div>
+  <div class="card-t">The desktop app does NOT read the repo's .env file</div>
   <p>Config and env vars come from the locations below — not from the repo's <code>.env</code> or <code>providers.json</code>.</p>
 </div>
 
@@ -108,20 +108,18 @@
 <table>
   <tr><th>What</th><th>Path</th></tr>
   <tr><td>Providers / aliases / keys</td><td><code>~/.config/headrouter/providers.json</code></td></tr>
+  <tr><td>Environment variables</td><td><code>~/.config/headrouter/.env</code></td></tr>
   <tr><td>Gateway log</td><td><code>~/.local/state/headrouter/gateway.log</code></td></tr>
-  <tr><td>Session env vars</td><td><code>~/.profile</code> (see below)</td></tr>
 </table>
 
 <h3>Setting env vars for the tray-launched gateway</h3>
-<p>The tray inherits your <strong>desktop session</strong> environment and passes it down to the gateway. Set vars in <code>~/.profile</code>, then <strong>log out and back in</strong>:</p>
-<pre><code><span class="c-com"># ~/.profile</span>
-export GATEWAY_API_KEYS=<span class="c-key">hr_...</span>          <span class="c-com"># admin key for /admin</span>
-export OPENROUTER_API_KEY=<span class="c-key">sk-or-...</span>     <span class="c-com"># credentials for api_key_env entries</span>
-<span class="c-com"># export COMPRESSION_STRATEGY=balanced</span>  <span class="c-com"># optional; default is coding</span></code></pre>
+<p>Edit <code>~/.config/headrouter/.env</code> — via tray → <strong>Edit environment</strong> (creates a commented template on first use) or any text editor — then tray → <strong>Restart</strong>. No logout needed:</p>
+<pre><code><span class="c-com"># ~/.config/headrouter/.env</span>
+GATEWAY_API_KEYS=<span class="c-key">hr_...</span>          <span class="c-com"># admin key for /admin</span>
+OPENROUTER_API_KEY=<span class="c-key">sk-or-...</span>     <span class="c-com"># credentials for api_key_env entries</span>
+<span class="c-com"># COMPRESSION_STRATEGY=balanced</span>  <span class="c-com"># optional; default is coding</span></code></pre>
 
-<p>Quick one-off test <em>without</em> logging out (tray passes its env to the gateway):</p>
-<pre><code>pkill -f headrouter
-GATEWAY_API_KEYS=<span class="c-key">hr_...</span> COMPRESSION_STRATEGY=balanced headrouter-tray &amp;</code></pre>
+<p>The file is loaded non-destructively: real environment variables (desktop session, wrapper scripts) always take precedence over it.</p>
 
 <h3>First run</h3>
 <ol>
@@ -159,8 +157,8 @@ GATEWAY_API_KEYS=<span class="c-key">hr_...</span> COMPRESSION_STRATEGY=balanced
 
 <h2 id="trouble">Troubleshooting</h2>
 <ul>
-  <li><strong>Admin page asks for a key / 403</strong> — set <code>GATEWAY_API_KEYS</code> in the session env; scoped providers.json keys get 403 on admin by design.</li>
-  <li><strong>Provider auth errors</strong> — the env var named by <code>api_key_env</code> isn't set in the gateway's environment. Add it to <code>~/.profile</code> and log out/in.</li>
+  <li><strong>Admin page asks for a key / 403</strong> — set <code>GATEWAY_API_KEYS</code> in <code>~/.config/headrouter/.env</code> (tray → <strong>Edit environment</strong>), then tray → <strong>Restart</strong>; scoped providers.json keys get 403 on admin by design.</li>
+  <li><strong>Provider auth errors</strong> — the env var named by <code>api_key_env</code> isn't set in the gateway's environment. Add it to <code>~/.config/headrouter/.env</code> and tray → <strong>Restart</strong>.</li>
   <li><strong>No tray icon on GNOME/Wayland</strong> — install/enable the "AppIndicator and KStatusNotifierItem Support" extension.</li>
   <li><strong>Where are the logs?</strong> — tray → <strong>Open logs</strong>, or <code>~/.local/state/headrouter/gateway.log</code>.</li>
   <li><strong>Changes to providers.json not applied</strong> — tray → <strong>Restart</strong> (or use the Admin UI, which applies with no restart).</li>

@@ -230,7 +230,7 @@ REST surface (consumed by the page, usable directly):
 | Variable | Default | Description |
 | --- | --- | --- |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Listen address |
-| `GATEWAY_ENV_FILE` | `.env` | Path to an alternative env file to auto-load |
+| `GATEWAY_ENV_FILE` | `.env` | Path to an alternative env file to auto-load (source/Docker runs; the desktop app additionally always loads the fixed `~/.config/headrouter/.env`) |
 | `GATEWAY_API_KEYS` | *(empty)* | Comma-separated **admin** keys (full routing power); empty disables auth |
 | `GATEWAY_PROVIDERS_FILE` / `GATEWAY_PROVIDERS` | *(empty)* | Providers/aliases/keys: JSON file path / inline JSON |
 | `GATEWAY_ROUTES` | *(empty)* | `alias=provider:model,...` env-based routing (admin keys) |
@@ -302,20 +302,20 @@ sudo dnf install ./packaging/fedora/build/headrouter-*.rpm
 
 See [packaging/macos/README.md](packaging/macos/README.md) — build with `bash packaging/macos/build-app.sh` on a Mac (uses the native pystray `_darwin` backend, `LSUIElement` menu-bar agent). Signing/notarization steps are documented there.
 
-### Desktop config: no `.env` is loaded
+### Desktop config: `.env` + `providers.json` in the XDG config dir
 
-The frozen gateway **does not read `.env` or the repo's `providers.json`**. Runtime config lives at:
+The frozen gateway **does not read the repo's `.env` or `providers.json`**. Runtime config lives at:
 
 - **Providers/aliases/keys** → `$XDG_CONFIG_HOME/headrouter/providers.json` (default `~/.config/headrouter/providers.json`), seeded as `{"providers": [], "keys": []}` on first run. Edit via the admin UI (tray → Open admin UI) or replace the file and Restart.
-- **Environment variables** (`GATEWAY_API_KEYS`, `COMPRESSION_STRATEGY`, provider `api_key_env` credentials, …) must exist in the **desktop session environment** — the tray inherits it and passes it down to the gateway. Set them in `~/.profile` and log out/in, e.g.:
+- **Environment variables** (`GATEWAY_API_KEYS`, `COMPRESSION_STRATEGY`, provider `api_key_env` credentials, …) → `$XDG_CONFIG_HOME/headrouter/.env` (default `~/.config/headrouter/.env`), loaded non-destructively at gateway startup. This applies to macOS `.app` and Linux `.deb`/`.rpm` installs alike — `$XDG_CONFIG_HOME` typically resolves to `~/.config` on both. Open it via tray → **Edit environment** (creates a commented template on first use) or any text editor, then tray → **Restart**. Example:
 
   ```bash
-  export GATEWAY_API_KEYS=hr_...          # admin key for /admin
-  export OPENROUTER_API_KEY=sk-or-...     # any api_key_env credentials referenced in providers.json
-  # export COMPRESSION_STRATEGY=balanced  # optional; defaults: coding, enabled, threshold 0
+  GATEWAY_API_KEYS=hr_...          # admin key for /admin
+  OPENROUTER_API_KEY=sk-or-...     # any api_key_env credentials referenced in providers.json
+  # COMPRESSION_STRATEGY=balanced  # optional; defaults: coding, enabled, threshold 0
   ```
 
-  Quick one-off test without logout: `pkill -f headrouter; GATEWAY_API_KEYS=hr_... headrouter-tray &`
+  Real environment variables always override the file (e.g. `launchctl setenv` on macOS, or `systemctl --user set-environment` / a wrapper script on Linux) — useful for advanced or scripted setups.
 - **Logs** → `$XDG_STATE_HOME/headrouter/gateway.log` (default `~/.local/state/headrouter/gateway.log`); tray → Open logs.
 
 ### How the freeze works (for maintainers)

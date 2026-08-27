@@ -13,6 +13,8 @@ from pathlib import Path
 
 import uvicorn
 
+from config import load_dotenv
+
 
 def _xdg_config_home() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -40,6 +42,11 @@ def _ensure_providers_file() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Load the fixed per-user desktop .env (non-destructive: real env vars
+    # always win) so GUI/autostart launches — which never source shell
+    # profiles — can still provide GATEWAY_API_KEYS and provider credentials.
+    load_dotenv(str(_xdg_config_home() / "headrouter" / ".env"))
+
     # Only default to listening on all interfaces once gateway keys are
     # configured; an unauthenticated gateway should not be reachable off-host.
     has_keys = bool(os.environ.get("GATEWAY_API_KEYS", "").strip()) or bool(
