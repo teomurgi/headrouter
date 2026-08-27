@@ -1,5 +1,12 @@
 # Headrouter
 
+**Your LLM traffic, minus the tokens you didn't need.**
+
+[![CI](https://github.com/teomurgi/headrouter/actions/workflows/ci.yml/badge.svg)](https://github.com/teomurgi/headrouter/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/teomurgi/headrouter)](https://github.com/teomurgi/headrouter/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
+
 A lightweight, **stateless** OpenAI-compatible gateway that:
 
 1. Accepts OpenAI Chat Completions requests (`/v1/chat/completions`)
@@ -11,6 +18,86 @@ A lightweight, **stateless** OpenAI-compatible gateway that:
 
 Works with any OpenAI-compatible client: Claude Code, OpenCode, Cline, Aider, Roo Code, PydanticAI, LangGraph, etc.
 
+## Why Headrouter?
+
+**It pays for itself in tokens.** Agentic coding sessions drag enormous
+contexts — tool outputs, logs, diffs, re-read files — through every single
+API call. Headrouter sits in front of your providers and compresses that
+context before you get billed for it.
+
+**It is genuinely tiny.** There is no database, no message queue, no sidecar,
+no cluster. One process holds the entire control plane, data plane, and admin
+UI.
+
+### Measured, not marketed
+
+Numbers below are from this repository, measured on an ARM64 Linux laptop
+(Python 3.12, `coding` strategy, default settings). Reproduce them with the
+one-liners in the collapsible section.
+
+**Running footprint:**
+
+| What | RSS |
+| --- | ---: |
+| Gateway idle (compression model preloaded) | **~50 MB** |
+| Gateway core only (compression disabled) | **~15 MB** |
+| Under active compression load | ~365 MB transient |
+| Extra processes / databases / queues | **0** |
+
+Everything else about the footprint: **~3,500 lines of Python** for the whole
+gateway, a **94 MB self-contained binary** (includes the compression model
+runtime — no Python install needed on target machines), and a config that
+fits in a single JSON file.
+
+**Compression, measured on real request shapes** (`/metrics` reports these
+live for your own traffic):
+
+| Workload | Tokens in → out | Saved |
+| --- | --- | ---: |
+| Repetitive logs (SRE/agent tool output) | 32,036 → 111 | **99.7%** |
+| Log-heavy agent session, 5 turns cumulative | 112,800 → 72,435 | **35.8%** |
+| Structured tool results (JSON lint output) | 35,444 → 26,444 | **25.4%** |
+| Git-diff-heavy session | 10,987 → 9,427 | **14.2%** |
+| Mixed workload (logs + JSON + diffs + code + prose) | 46,400 → 41,018 | **11.6%** |
+| Already-dense source code | — | 0% (protected, never grows) |
+
+Two honest caveats, by design: compression is content-dependent — dense,
+already-irreducible context is passed through untouched (the compressor
+**never expands** a request), and any compression failure degrades to
+passthrough rather than blocking your request. The aggressive `agent-90`
+profile targets ~90% savings for tool-output-heavy agent trajectories.
+
+<details>
+<summary><strong>Reproduce these numbers</strong></summary>
+
+```bash
+.venv/bin/pip install -e .
+.venv/bin/python - <<'EOF'
+import os
+os.environ["COMPRESSION_STRATEGY"] = "coding"
+from compression_service import CompressionService
+
+def rss_mb():
+    return int([l for l in open("/proc/self/status") if l.startswith("VmRSS")][0].split()[1]) / 1024
+
+svc = CompressionService(); svc.prefetch()
+print(f"RSS idle with model: {rss_mb():.0f} MB")
+
+logs = "\n".join(f"2026-08-27 10:{i%60:02d}:00 INFO worker-{i%4} job={1000+i} ok" for i in range(400))
+msgs = [{"role": "system", "content": "You are an SRE."},
+        {"role": "user", "content": f"Logs:\n{logs}\nErrors?"},
+        {"role": "assistant", "content": "None."},
+        {"role": "user", "content": f"More:\n{logs}\nSummary?"}]
+r = svc._maybe_compress_sync(msgs)
+print(f"{r.tokens_before} -> {r.tokens_after} tokens ({r.tokens_saved/r.tokens_before:.1%} saved)")
+EOF
+```
+
+For live numbers on your own traffic, run the gateway and open `/admin` —
+the dashboard shows cumulative compression savings, or scrape `/metrics`.
+
+</details>
+
 ## Quick start
 
 ```bash
@@ -18,7 +105,8 @@ python -m venv .venv && .venv/bin/pip install -e .
 
 cp .env.example .env   # then edit: provider credentials, GATEWAY_API_KEYS, ...
 
-c
+.venv/bin/python -m uvicorn app:app --port 8000
+# or: .venv/bin/headrouter-gateway
 ```
 
 A `.env` file in the working directory (or the repo root) is loaded automatically at startup — no need to `export` variables manually. Real environment variables always take precedence; `.env` only fills in what isn't already set. Set `GATEWAY_ENV_FILE` to load a different file.
@@ -73,7 +161,7 @@ Without a providers file, `GATEWAY_ROUTES="alias=provider:model,..."` and `GATEW
 
 ## Admin UI & API (`/admin`)
 
-Open `c`. The page itself is public (static HTML); every API call below requires a **gateway key** (`Authorization: Bearer ...`). It inherits gateway auth — there is no separate login.
+Open <http://localhost:8000/admin>. The page itself is public (static HTML); every API call below requires a **gateway key** (`Authorization: Bearer ...`). It inherits gateway auth — there is no separate login.
 
 - **Dashboard** — KPI row (requests, latency p50/p95, tokens in/out, compression savings), live request stream (cursor-polled, filter by compressed/errors, pausable), keys/providers rail.
 - **Keys & Aliases** — chip-card editing with a sticky stage → validate → apply bar. Staged changes show a client-computed diff; Validate surfaces server errors verbatim; Apply is re-validated server-side and, on rejection, your staging is preserved.
@@ -212,3 +300,15 @@ Client -> FastAPI app
 ```
 
 Engineering invariants and contracts live in [`docs/architecture.md`](docs/architecture.md); UX behavior in [`docs/ux-spec.md`](docs/ux-spec.md).
+
+## Community
+
+- **Bugs & features** — [open an issue](../../issues) (templates provided; redact secrets)
+- **Contributing** — see [CONTRIBUTING.md](CONTRIBUTING.md) (setup, ground rules, PR checklist)
+- **Security** — report privately per [SECURITY.md](SECURITY.md); never in a public issue
+- **Conduct** — this project follows the [Contributor Covenant](CODE_OF_CONDUCT.md)
+- **Changes** — see [CHANGELOG.md](CHANGELOG.md)
+
+## License
+
+[MIT](LICENSE) © 2026 Headrouter contributors.

@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a defect in the gateway, admin UI, or packaging
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Redact all secrets (API keys, key values) before pasting configs or logs.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you observe instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Request sequence, config shape (providers/aliases/keys — values redacted), client used.
+      placeholder: |
+        1. providers.json with alias "fast" -> or:gpt-4o-mini, key team-a granted ["fast"]
+        2. POST /v1/chat/completions with model "fast" ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant lines from stdout or ~/.local/state/headrouter/gateway.log (secrets redacted).
+      render: text
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Routing / aliases / keys
+        - Compression
+        - Provider adapter (OpenAI / Anthropic / Gemini / Ollama / OpenRouter)
+        - Admin UI / API
+        - Proxy passthrough
+        - Desktop tray / packaging (.deb / .app)
+        - Docs
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, commit SHA, or "main".
+    validations:
+      required: true
