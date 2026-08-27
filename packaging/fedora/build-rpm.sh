@@ -25,6 +25,9 @@ if [[ -f "$ROOT/packaging/fedora/version" ]]; then
 else
   VERSION="$(grep -m1 '^version' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
 fi
+# Sanitize: rpmbuild forbids '-' and path/whitespace chars in Version. Keep only
+# alphanumerics, '.', '_', '~', '+'. Turn any stray '-' into '~'.
+VERSION="$(printf '%s' "$VERSION" | tr -d ' \t\r\n' | sed 's/-/~/g; s/[^A-Za-z0-9._~+]//g')"
 
 # rpmbuild wants x86_64 / aarch64, not dpkg-style amd64 / arm64.
 case "$(uname -m)" in

@@ -13,7 +13,10 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
     "headroom-ai[ml]>=0.36",
-    "onnxruntime>=1.24",
+    # onnxruntime dropped Intel (x86_64) macOS wheels after 1.23.x; only arm64
+    # mac builds exist for >=1.24. Pin Intel Macs to the last available build.
+    "onnxruntime>=1.24; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "onnxruntime>=1.23,<1.24; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]

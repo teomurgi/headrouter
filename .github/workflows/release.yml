@@ -138,8 +138,11 @@ jobs:
           if [[ "${{ matrix.pkg }}" == "deb" ]]; then
             perl -pi -e "s/^Version: .*/Version: $VERSION/" packaging/ubuntu/control
           else
-            # rpmbuild versions cannot contain '-'; 0.0.4-test -> 0.0.4~test
-            echo "${VERSION/-/~}" > packaging/fedora/version
+            # rpmbuild versions cannot contain '-'; 0.0.4-test -> 0.0.4~test.
+            # Build the string with sed so no bare '~' is produced by a shell
+            # substitution (which some shells tilde-expand to $HOME).
+            RPM_VERSION="$(printf '%s' "$VERSION" | sed 's/-/~/')"
+            printf '%s' "$RPM_VERSION" > packaging/fedora/version
           fi
 
       - name: Build project venv
