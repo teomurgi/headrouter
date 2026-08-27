@@ -112,6 +112,14 @@ build step, no terminal required beyond the install itself:
   `Headrouter-*-macos-intel.zip` (Intel), unzip, and drag **Headrouter.app**
   into Applications. Launch it to get a menu-bar icon that manages the gateway
   for you.
+
+  The macOS build is **not signed/notarized** yet, so on first launch Gatekeeper
+  may say it "cannot be opened because the developer cannot be verified" (or, on
+  Apple Silicon, that it's "damaged"). Either **right-click → Open → Open**, or
+  clear the quarantine flag once:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Headrouter.app
+  ```
 - **Ubuntu / Debian** — download the `.deb` for your architecture
   (`headrouter_*_amd64.deb` or `headrouter_*_arm64.deb`) and install it:
   ```bash
