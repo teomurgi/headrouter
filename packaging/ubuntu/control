@@ -1,5 +1,5 @@
 Package: headrouter
-Version: 0.2.1
+Version: 0.2.2
 Section: net
 Priority: optional
 Architecture: @ARCH@

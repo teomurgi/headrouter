@@ -31,7 +31,8 @@ echo ">> cleaning previous build"
 rm -rf "$BUILD" "$ROOT/packaging/dist" "$ROOT/packaging/build"
 mkdir -p "$STAGE"
 
-# --- provision a tray freeze venv on system python (gi ABI must match) -------
+# --- provision a tray freeze venv (frozen interpreter's ABI defines what the
+# --- bundle needs; PyInstaller bundles gi + typelibs, so it is self-contained)
 if [[ ! -x "$TRAY_VENV/bin/pyinstaller" ]]; then
   echo ">> provisioning tray freeze venv at $TRAY_VENV (system python + pystray)"
   "$SYSTEM_PY" -m venv --system-site-packages "$TRAY_VENV"
@@ -43,7 +44,7 @@ fi
 cd "$ROOT/packaging"
 echo ">> freezing gateway binary (self-contained, .venv python 3.12)"
 "$GATEWAY_PYINSTALLER" --noconfirm --clean gateway.spec >/dev/null
-echo ">> freezing tray binary (system python 3.14 for gi/AppIndicator)"
+echo ">> freezing tray binary (self-contained: gi + typelibs bundled)"
 "$TRAY_VENV/bin/pyinstaller" --noconfirm --clean tray.spec >/dev/null
 cd "$ROOT"
 

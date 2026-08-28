@@ -1,9 +1,10 @@
 # PyInstaller spec for the Headrouter tray frontend binary.
-# NOTE (Linux): the tray uses AppIndicator via system GObject introspection
-# (python3-gi / gir1.2-ayatanaappindicator3-0.1). PyInstaller CANNOT bundle
-# those native typelibs, so this binary depends on them at runtime — they are
-# declared as Depends: in the .deb. Build with a Python 3.14 interpreter that
-# matches the system gi ABI and has pystray+Pillow+pyinstaller:
+# NOTE (Linux): PyInstaller's gi hooks bundle the gi C extension, the GTK /
+# AppIndicator typelibs and the needed shared libraries into the binary, so
+# the tray is self-contained. The .deb still declares python3-gi /
+# gir1.2-ayatanaappindicator3-0.1 under Depends: as a safety net.
+# Build with any Python 3 that has pystray+Pillow+pyinstaller (CI uses the
+# ubuntu-24.04-arm system python):
 #   /usr/bin/python3 -m venv --system-site-packages /tmp/tray-venv
 #   /tmp/tray-venv/bin/pip install pystray pillow pyinstaller
 #   /tmp/tray-venv/bin/pyinstaller packaging/tray.spec
@@ -19,10 +20,9 @@ a = Analysis(
     hiddenimports=["pystray._appindicator", "pystray._gtk", "pystray._xorg"],
     hookspath=[],
     hooksconfig={},
-    # runtime hook prepends system dist-packages so `import gi` resolves to
-    # the OS GObject introspection bindings at runtime (same 3.14 ABI).
-    runtime_hooks=["tray_runtime_hook.py"],
-    excludes=[],  # do NOT exclude gi: it must resolve from the system at runtime
+    # No runtime hook: prepending system dist-packages would let a system
+    # Pillow (built for a different interpreter ABI) shadow the bundled PIL
+    # and break `from PIL import Image` with an ImportError on _imaging.
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

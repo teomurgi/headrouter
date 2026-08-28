@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-28
+
+### Fixed
+
+- **Tray: startup crash on machines with system Pillow** — the runtime hook
+  prepended system dist-packages, so a system Pillow built for a different
+  Python ABI shadowed the bundled PIL and crashed the tray with
+  `ImportError: cannot import name '_imaging'`. The runtime hook is removed
+  entirely: the frozen binary is self-contained (gi, AppIndicator typelibs,
+  GTK libraries bundled), so system dist-packages are never consulted.
+
 ## [0.2.1] - 2026-08-28
 
 ### Fixed
@@ -14,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   '_sysconfigdata__aarch64-linux-gnu'`. The runtime hook no longer calls
   `sysconfig` (PyInstaller's hook cannot collect the Debian-patched
   `_sysconfigdata` module); dist-packages globs already cover every path.
+
 
 ## [0.2.0] - 2026-08-27
 
