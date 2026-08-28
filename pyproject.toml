@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "headrouter"
-version = "0.2.0"
+version = "0.2.1"
 description = "Stateless OpenAI-compatible gateway with Headroom context compression and multi-provider routing"
 requires-python = ">=3.12"
 dependencies = [
