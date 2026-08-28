@@ -325,7 +325,7 @@ Two separate PyInstaller binaries are built with **two different interpreters**:
 | Binary | Frozen with | Why |
 | --- | --- | --- |
 | `headrouter-gateway` | project `.venv` (Python 3.12) | bundles headroom-ai + onnxruntime |
-| `headrouter-tray` | system `python3` (3.14) venv | system `gi`/AyatanaAppIndicator3 typelibs are compiled for the 3.14 ABI and **cannot** be bundled; [packaging/tray_runtime_hook.py](packaging/tray_runtime_hook.py) prepends system dist-packages to `sys.path` so `import gi` resolves from the OS at runtime. Do **not** add `excludes=["gi"]` to tray.spec — that makes the frozen importer block it entirely. |
+| `headrouter-tray` | host `python3` (any 3.x with pystray + Pillow) | fully self-contained: PyInstaller's gi hooks bundle the `gi` extension, the GTK/AppIndicator typelibs and the GTK/Ayatana shared libraries, so no system dist-packages are needed at runtime. Do **not** add a runtime hook that prepends dist-packages — a system Pillow built for a different interpreter ABI would shadow the bundled PIL and crash with `ImportError: cannot import name '_imaging'`. |
 
 Build specs: [packaging/gateway.spec](packaging/gateway.spec), [packaging/tray.spec](packaging/tray.spec) (run `pyinstaller` from `packaging/`). The `.deb` ships `providers.example.json` as a reference only — never a real `providers.json` (which holds secrets).
 
