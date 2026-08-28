@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-08-28
+
+### Fixed
+
+- **Tray: "Edit environment" / "Open logs" opened in the web browser** —
+  both menu items used `webbrowser.open(file://...)`, which hands the file
+  to the desktop's default handler (often Firefox). Firefox refuses
+  `file://` dotfiles, and sandboxed (snap/flatpak) browsers can't read
+  `~/.config` at all, showing "Access to the file was denied". Both now
+  open in a GUI text editor via a new `_open_in_text_editor()` helper:
+  `$VISUAL`/`$EDITOR` (skipping terminal editors that can't be detached
+  from a tray), then a curated list of GUI editors, then `open -t` on
+  macOS / `xdg-open` as a last resort.
+
+### Added
+
+- **Feature test suite** — 23 end-to-end tests in `tests/test_feature_*.py`
+  covering gateway user journeys (discover → chat, cross-provider alias
+  routing, streaming, auth enforcement, no key leakage upstream), tray &
+  launcher desktop behaviour (env/providers file creation and permissions,
+  editor selection), and the CLI entry points (localhost-only binding when
+  unauthenticated, `0.0.0.0` with keys, flag wiring).
+
 ## [0.2.2] - 2026-08-28
 
 ### Fixed

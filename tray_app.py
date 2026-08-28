@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -58,6 +60,40 @@ def _ensure_env_file() -> None:
     ENV_FILE.touch(mode=0o600)
     os.chmod(ENV_FILE, 0o600)
     ENV_FILE.write_text(_ENV_TEMPLATE, encoding="utf-8")
+
+
+# Terminal-only editors must not be launched detached from a tray app.
+_TERMINAL_EDITORS = {"vi", "vim", "nvim", "nano", "emacs", "emacsclient", "micro", "joe"}
+
+
+def _open_in_text_editor(path: Path) -> None:
+    """Open *path* in a GUI text editor (never the web browser).
+
+    webbrowser.open()/xdg-open resolve via the desktop's default handler for
+    the file type, which is often Firefox — and sandboxed (snap/flatpak)
+    browsers can't even read ~/.config, showing "Access to the file was
+    denied". Prefer an explicit editor instead.
+    """
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", "-t", str(path)])
+        return
+    for var in ("VISUAL", "EDITOR"):
+        cand = os.environ.get(var, "").strip()
+        if not cand:
+            continue
+        argv = shlex.split(cand)
+        if argv and Path(argv[0]).name not in _TERMINAL_EDITORS and shutil.which(argv[0]):
+            subprocess.Popen(argv + [str(path)])
+            return
+    for name in (
+        "gnome-text-editor", "gedit", "kate", "xed", "mousepad", "pluma",
+        "code", "codium", "subl", "notepadqq", "featherpad",
+    ):
+        exe = shutil.which(name)
+        if exe:
+            subprocess.Popen([exe, str(path)])
+            return
+    subprocess.Popen(["xdg-open", str(path)])
 
 
 def _resource_base() -> Path:
@@ -312,11 +348,11 @@ class GatewayTray:
             ),
             MenuItem(
                 "Open logs",
-                lambda _i, _it: webbrowser.open(LOG_FILE.as_uri()),
+                lambda _i, _it: _open_in_text_editor(LOG_FILE),
             ),
             MenuItem(
                 "Edit environment",
-                lambda _i, _it: (_ensure_env_file(), webbrowser.open(ENV_FILE.as_uri())),
+                lambda _i, _it: (_ensure_env_file(), _open_in_text_editor(ENV_FILE)),
             ),
             pystray.Menu.SEPARATOR,
             MenuItem(
