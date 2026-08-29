@@ -44,6 +44,49 @@ _state_dir.mkdir(parents=True, exist_ok=True)
 LOG_FILE = _state_dir / "gateway.log"
 ENV_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "headrouter" / ".env"
 
+# Environment variables that PyInstaller's runtime hooks inject into a frozen
+# process (and its children) so the bundled GTK/PyGObject stack can find its
+# own libraries. They must NOT leak into helper processes we spawn (text
+# editors, xdg-open), or those system binaries load the bundled (older)
+# libraries and crash with e.g. "symbol lookup error: g_sort_array".
+_PYINSTALLER_LEAKED_VARS = (
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "GI_TYPELIB_PATH",
+    "GIO_MODULE_DIR",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GDK_PIXBUF_MODULEDIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GST_PLUGIN_PATH",
+    "GST_PLUGIN_SYSTEM_PATH",
+    "XDG_DATA_DIRS",
+)
+
+
+def _clean_child_env(env: dict | None = None) -> dict:
+    """Return an environment safe for spawning system helpers from a frozen app.
+
+    When frozen by PyInstaller, our own process carries runtime-hook-injected
+    variables (LD_LIBRARY_PATH etc.) pointing at the temporary _MEIPASS dir.
+    Any system GUI binary we spawn (text editor, xdg-open) inherits them and
+    then dynamically links against the bundled libraries instead of the system
+    ones — and dies instantly. Strip them so the child links normally.
+
+    PyInstaller also stashes the *original* values in LD_LIBRARY_PATH_ORIG /
+    LD_PRELOAD_ORIG; restore those when present so the user's real settings
+    still apply.
+    """
+    env = dict(os.environ if env is None else env)
+    if getattr(sys, "frozen", False):
+        for var in _PYINSTALLER_LEAKED_VARS:
+            orig = env.pop(var + "_ORIG", None)
+            if orig is not None:
+                env[var] = orig
+            else:
+                env.pop(var, None)
+    return env
+
 _ENV_TEMPLATE = """\
 # Headrouter environment overrides.
 # Uncomment and edit, then use tray → Restart.
@@ -66,6 +109,11 @@ def _ensure_env_file() -> None:
 _TERMINAL_EDITORS = {"vi", "vim", "nvim", "nano", "emacs", "emacsclient", "micro", "joe"}
 
 
+def _spawn(argv: list[str]) -> None:
+    """Launch a detached helper (editor/opener) with a sanitized environment."""
+    subprocess.Popen(argv, env=_clean_child_env())
+
+
 def _open_in_text_editor(path: Path) -> None:
     """Open *path* in a GUI text editor (never the web browser).
 
@@ -75,7 +123,7 @@ def _open_in_text_editor(path: Path) -> None:
     denied". Prefer an explicit editor instead.
     """
     if sys.platform == "darwin":
-        subprocess.Popen(["open", "-t", str(path)])
+        _spawn(["open", "-t", str(path)])
         return
     for var in ("VISUAL", "EDITOR"):
         cand = os.environ.get(var, "").strip()
@@ -83,7 +131,7 @@ def _open_in_text_editor(path: Path) -> None:
             continue
         argv = shlex.split(cand)
         if argv and Path(argv[0]).name not in _TERMINAL_EDITORS and shutil.which(argv[0]):
-            subprocess.Popen(argv + [str(path)])
+            _spawn(argv + [str(path)])
             return
     for name in (
         "gnome-text-editor", "gedit", "kate", "xed", "mousepad", "pluma",
@@ -91,9 +139,9 @@ def _open_in_text_editor(path: Path) -> None:
     ):
         exe = shutil.which(name)
         if exe:
-            subprocess.Popen([exe, str(path)])
+            _spawn([exe, str(path)])
             return
-    subprocess.Popen(["xdg-open", str(path)])
+    _spawn(["xdg-open", str(path)])
 
 
 def _resource_base() -> Path:

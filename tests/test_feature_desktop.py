@@ -156,3 +156,149 @@ def test_resolve_launch_frozen_gateway_binary(tmp_path, monkeypatch):
 
     assert cmd[0] == str(fake_bin.resolve())
     assert cmd[1:] == ["--port", "8000"]
+
+
+# --- PyInstaller env leakage ---------------------------------------------------
+#
+# Root cause of "Open logs / Edit environment do nothing" on the packaged
+# Ubuntu build: PyInstaller's runtime hooks inject LD_LIBRARY_PATH,
+# GI_TYPELIB_PATH, GTK_PATH, etc. into the *frozen tray process itself* at
+# runtime (they never appear in /proc/<tray>/environ, which is why the bug was
+# invisible to `env`-based debugging). Any system GUI binary spawned with that
+# inherited environment dynamically links against the bundled (older) glib and
+# dies instantly with e.g. "symbol lookup error: ... g_sort_array".
+
+
+def test_clean_child_env_strips_pyinstaller_vars_when_frozen(monkeypatch):
+    monkeypatch.setattr(tray_app.sys, "frozen", True, raising=False)
+    dirty = {
+        "LD_LIBRARY_PATH": "/tmp/_MEIxxxx",
+        "GI_TYPELIB_PATH": "/tmp/_MEIxxxx/gi_typelibs",
+        "GIO_MODULE_DIR": "/tmp/_MEIxxxx/gio_modules",
+        "GTK_PATH": "/tmp/_MEIxxxx/gtk",
+        "XDG_DATA_DIRS": "/tmp/_MEIxxxx/share",
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/home/u",
+    }
+    clean = tray_app._clean_child_env(dirty)
+    for var in ("LD_LIBRARY_PATH", "GI_TYPELIB_PATH", "GIO_MODULE_DIR", "GTK_PATH", "XDG_DATA_DIRS"):
+        assert var not in clean, f"{var} leaked into child env"
+    # Normal variables are preserved untouched.
+    assert clean["PATH"] == "/usr/bin:/bin"
+    assert clean["HOME"] == "/home/u"
+
+
+def test_clean_child_env_restores_orig_values(monkeypatch):
+    """PyInstaller saves the user's real values in *_ORIG; restore them."""
+    monkeypatch.setattr(tray_app.sys, "frozen", True, raising=False)
+    dirty = {
+        "LD_LIBRARY_PATH": "/tmp/_MEIxxxx",
+        "LD_LIBRARY_PATH_ORIG": "/opt/myapp/lib",
+        "LD_PRELOAD": "/tmp/_MEIxxxx/preload.so",
+        "LD_PRELOAD_ORIG": "/opt/myapp/preload.so",
+    }
+    clean = tray_app._clean_child_env(dirty)
+    assert clean["LD_LIBRARY_PATH"] == "/opt/myapp/lib"
+    assert clean["LD_PRELOAD"] == "/opt/myapp/preload.so"
+    assert "LD_LIBRARY_PATH_ORIG" not in clean
+    assert "LD_PRELOAD_ORIG" not in clean
+
+
+def test_clean_child_env_noop_when_not_frozen(monkeypatch):
+    monkeypatch.delattr(tray_app.sys, "frozen", raising=False)
+    env = {"LD_LIBRARY_PATH": "/opt/myapp/lib", "PATH": "/usr/bin"}
+    # Unfrozen (source) runs must not have their environment rewritten.
+    assert tray_app._clean_child_env(env) == env
+
+
+def test_spawn_passes_sanitized_env(monkeypatch):
+    """The helper spawn path must use _clean_child_env, not os.environ."""
+    monkeypatch.setattr(tray_app.sys, "frozen", True, raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEIxxxx")
+    monkeypatch.setenv("GI_TYPELIB_PATH", "/tmp/_MEIxxxx/gi_typelibs")
+    captured = {}
+    monkeypatch.setattr(
+        tray_app.subprocess, "Popen",
+        lambda argv, **kw: captured.update(argv=argv, env=kw.get("env")),
+    )
+
+    tray_app._spawn(["/usr/bin/gedit", "/tmp/x/.env"])
+
+    assert captured["argv"] == ["/usr/bin/gedit", "/tmp/x/.env"]
+    assert "LD_LIBRARY_PATH" not in captured["env"]
+    assert "GI_TYPELIB_PATH" not in captured["env"]
+
+
+def test_open_in_text_editor_spawns_with_clean_env(monkeypatch):
+    """End-to-end: opening a file must not leak PyInstaller vars to the editor."""
+    monkeypatch.setattr(tray_app.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(tray_app.sys, "platform", "linux")
+    monkeypatch.delenv("VISUAL", raising=False)
+    monkeypatch.delenv("EDITOR", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEIxxxx")
+    monkeypatch.setattr(tray_app.shutil, "which",
+                        lambda name: "/usr/bin/gedit" if name == "gedit" else None)
+    captured = {}
+    monkeypatch.setattr(
+        tray_app.subprocess, "Popen",
+        lambda argv, **kw: captured.update(argv=argv, env=kw.get("env")),
+    )
+
+    tray_app._open_in_text_editor(Path("/tmp/x/.env"))
+
+    assert captured["argv"] == ["/usr/bin/gedit", "/tmp/x/.env"]
+    assert "LD_LIBRARY_PATH" not in captured["env"]
+
+
+# --- tray menu wiring ----------------------------------------------------------
+
+
+def _make_tray():
+    with mock.patch.object(tray_app.pystray, "Icon"):
+        return tray_app.GatewayTray("127.0.0.1", 8123, ["true"], autostart=False)
+
+
+def _menu_item(tray, label):
+    for item in tray._menu():
+        try:
+            if item.text == label:
+                return item
+        except Exception:
+            continue  # separators have no text
+    raise AssertionError(f"menu item {label!r} not found")
+
+
+def test_menu_has_logs_and_environment_entries():
+    """The menu must expose 'Open logs' and 'Edit environment' entries."""
+    tray = _make_tray()
+    _menu_item(tray, "Open logs")
+    _menu_item(tray, "Edit environment")
+
+
+def test_menu_open_logs_invokes_editor_on_log_file(monkeypatch):
+    """Clicking 'Open logs' must open LOG_FILE in the text editor."""
+    opened = {}
+    monkeypatch.setattr(tray_app, "_open_in_text_editor",
+                        lambda p: opened.setdefault("path", p))
+    tray = _make_tray()
+    item = _menu_item(tray, "Open logs")
+
+    item._action(tray.icon, item)  # simulate a menu click
+
+    assert opened["path"] == tray_app.LOG_FILE
+
+
+def test_menu_edit_environment_creates_and_opens_env_file(tmp_path, monkeypatch):
+    """Clicking 'Edit environment' must ensure the .env exists, then open it."""
+    env_file = tmp_path / "headrouter" / ".env"
+    monkeypatch.setattr(tray_app, "ENV_FILE", env_file)
+    opened = {}
+    monkeypatch.setattr(tray_app, "_open_in_text_editor",
+                        lambda p: opened.setdefault("path", p))
+    tray = _make_tray()
+    item = _menu_item(tray, "Edit environment")
+
+    item._action(tray.icon, item)
+
+    assert env_file.exists()
+    assert opened["path"] == env_file

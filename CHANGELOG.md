@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-29
+
+### Fixed
+
+- **Tray: "Open logs" / "Edit environment" silently did nothing on the
+  packaged Linux build** — the tray is a PyInstaller onefile binary whose
+  runtime hooks inject `LD_LIBRARY_PATH`, `GI_TYPELIB_PATH`, `GIO_MODULE_DIR`,
+  `GTK_PATH`, etc. into the tray *process itself* (they never appear in
+  `/proc/<tray>/environ`). The spawned GUI editor / `xdg-open` inherited that
+  environment, dynamically linked against the bundled (older) glib, and died
+  instantly with `symbol lookup error: ... g_sort_array` before any window
+  appeared. Helper processes are now spawned via a new `_clean_child_env()`
+  that strips the PyInstaller-injected variables (restoring the user's real
+  `*_ORIG` values) so children link against the system libraries.
+
+### Added
+
+- **Regression tests for the above** — env-sanitisation unit tests
+  (`_clean_child_env` strips/restores correctly, no-op when unfrozen), an
+  end-to-end test that `_open_in_text_editor` spawns the editor with a clean
+  environment, and tray menu-wiring tests that click "Open logs" / "Edit
+  environment" and assert they reach the editor with the right file.
+
 ## [0.2.3] - 2026-08-28
 
 ### Fixed
