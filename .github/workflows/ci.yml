@@ -20,7 +20,9 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -e ".[dev]"
+          # Include the [tray] extra so the tray/desktop feature tests can
+          # import tray_app (pystray, pillow) instead of erroring at collection.
+          .venv/bin/pip install -e ".[dev,tray]"
 
       - name: Run tests
         run: .venv/bin/python -m pytest -q
