@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
+
+# Tests import tray_app, which does `import pystray` at module load. pystray's
+# X backend probes $DISPLAY at import time and raises Xlib DisplayNameError on
+# headless machines (CI). Force the no-op dummy backend so the tray module is
+# importable everywhere; GUI behaviour is mocked in the tests themselves.
+os.environ.setdefault("PYSTRAY_BACKEND", "dummy")
 
 import httpx
 import pytest
